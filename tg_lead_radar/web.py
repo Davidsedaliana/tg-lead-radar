@@ -1,0 +1,101 @@
+"""Web mode: no my.telegram.org credentials needed.
+
+Polls t.me/s previews of public channels, filters posts, and notifies via a
+regular Bot API bot (the bot must have been /start-ed by the recipient once).
+On the very first poll of a channel only the freshest few matches are sent,
+so the backlog does not flood the chat.
+"""
+
+import logging
+import time
+
+import httpx
+
+from .config import Settings, load_settings
+from .radar import build_card
+from .store import SeenStore
+from .webpreview import fetch_channel
+
+logger = logging.getLogger(__name__)
+
+BACKLOG_NOTIFY_LIMIT = 3
+
+
+def send_via_bot(client: httpx.Client, token: str, user_id: int, text: str) -> None:
+    resp = client.post(
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        json={"chat_id": user_id, "text": text, "disable_web_page_preview": True},
+    )
+    resp.raise_for_status()
+
+
+def poll_once(client: httpx.Client, store: SeenStore, settings: Settings) -> int:
+    """One sweep over all web channels. Returns how many cards were sent."""
+    sent = 0
+    for channel in settings.web_channel_list():
+        try:
+            posts = fetch_channel(client, channel)
+        except Exception:
+            logger.exception("Failed to fetch @%s", channel)
+            continue
+        if not posts:
+            logger.warning("@%s: no posts in preview (chat instead of channel?)", channel)
+            continue
+
+        first_time = not store.has_chat(channel)
+        cards: list[str] = []
+        for post in sorted(posts, key=lambda p: p.msg_id):
+            if store.is_seen(channel, post.msg_id):
+                continue
+            built = build_card(
+                text=post.text,
+                chat_id=0,
+                msg_id=post.msg_id,
+                chat_title=f"@{channel}",
+                chat_username=channel,
+            )
+            store.mark_seen(channel, post.msg_id, built[1] if built else [])
+            if built:
+                cards.append(built[0])
+
+        if first_time and len(cards) > BACKLOG_NOTIFY_LIMIT:
+            logger.info("@%s: first poll, trimming backlog %d -> %d",
+                        channel, len(cards), BACKLOG_NOTIFY_LIMIT)
+            cards = cards[-BACKLOG_NOTIFY_LIMIT:]
+
+        for card in cards:
+            try:
+                send_via_bot(client, settings.bot_token, settings.notify_user_id, card)
+                sent += 1
+            except Exception:
+                logger.exception("Failed to notify about a lead in @%s", channel)
+    return sent
+
+
+def run() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    settings = load_settings()
+    if not settings.bot_token or not settings.notify_user_id:
+        raise SystemExit("Web mode needs BOT_TOKEN and NOTIFY_USER_ID in .env")
+    store = SeenStore(settings.db_path)
+    logger.info(
+        "Web radar up: %s, every %ss", settings.web_channel_list(), settings.poll_interval_seconds
+    )
+    with httpx.Client(timeout=30) as client:
+        try:
+            while True:
+                sent = poll_once(client, store, settings)
+                if sent:
+                    logger.info("Poll cycle done: %d cards sent", sent)
+                time.sleep(settings.poll_interval_seconds)
+        except KeyboardInterrupt:
+            logger.info("Stopped")
+        finally:
+            store.close()
+
+
+if __name__ == "__main__":
+    run()

@@ -2,15 +2,19 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
+# chat_id is an int in userbot mode and a channel username (str) in web mode —
+# sqlite type affinity stores both fine.
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS seen (
-    chat_id INTEGER NOT NULL,
+    chat_id NOT NULL,
     msg_id INTEGER NOT NULL,
     categories TEXT NOT NULL,
     created_at TEXT NOT NULL,
     PRIMARY KEY (chat_id, msg_id)
 );
 """
+
+ChatKey = int | str
 
 
 class SeenStore:
@@ -26,13 +30,17 @@ class SeenStore:
     def close(self) -> None:
         self._conn.close()
 
-    def is_seen(self, chat_id: int, msg_id: int) -> bool:
+    def has_chat(self, chat_id: ChatKey) -> bool:
+        cur = self._conn.execute("SELECT 1 FROM seen WHERE chat_id = ? LIMIT 1", (chat_id,))
+        return cur.fetchone() is not None
+
+    def is_seen(self, chat_id: ChatKey, msg_id: int) -> bool:
         cur = self._conn.execute(
             "SELECT 1 FROM seen WHERE chat_id = ? AND msg_id = ?", (chat_id, msg_id)
         )
         return cur.fetchone() is not None
 
-    def mark_seen(self, chat_id: int, msg_id: int, categories: list[str]) -> None:
+    def mark_seen(self, chat_id: ChatKey, msg_id: int, categories: list[str]) -> None:
         now = datetime.now(UTC).isoformat(timespec="seconds")
         self._conn.execute(
             "INSERT OR IGNORE INTO seen (chat_id, msg_id, categories, created_at) "
