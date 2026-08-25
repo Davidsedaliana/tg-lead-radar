@@ -32,11 +32,14 @@ CATEGORIES: dict[str, list[str]] = {
 
 WEAK_CATEGORIES = {"python"}
 
-# Posts by other freelancers advertising themselves, CVs, etc.
+# Posts by other freelancers/agencies advertising themselves, CVs, etc.
 ANTI = [
-    "ищу работу", "ищу заказ", "ищу проект", "резюме", "#резюме",
-    "предлагаю услуги", "мои услуги", "возьму заказ", "выполню ваш",
-    "готов взяться", "открыт к предложени", "#ищуработу",
+    "ищу работу", "ищу заказ", "ищу проект", "ищу себе", "ищу позици",
+    "резюме", "#резюме", "предлагаю услуги", "мои услуги", "возьму заказ",
+    "выполню ваш", "готов взяться", "открыт к предложени", "#ищуработу",
+    # agency / studio self-promo
+    "мы создаем", "мы создаём", "мы разрабатываем", "наша студия",
+    "наша команда разрабат", "мы делаем сайты", "обо мне:", "мой опыт:",
 ]
 
 # Ads: promo posts, courses, giveaways — the channels' bread, our noise.
@@ -47,11 +50,16 @@ ADS = [
     "регистрируйся", "по ссылке в шапке",
 ]
 
-# Off-profile topics: if such a post matched only weak keywords, drop it.
+# Off-profile roles. In the title zone they veto unconditionally: a job ad
+# titled "Графический дизайнер" stays off-profile no matter how much the body
+# talks about neural networks and automation.
 TOPIC_VETO = [
-    "дизайнер", "логотип", "smm", "смм", "таргетолог", "таргетированн",
-    "копирайт", "монтаж", "видеомонтаж", "маркетолог", "продажник",
-    "менеджер по продаж", "озвучк", "иллюстратор", "моушн", "3d-модел",
+    "дизайнер", "дизайнер", "логотип", "smm", "смм", "таргетолог",
+    "таргетированн", "копирайт", "монтаж", "видеомонтаж", "маркетолог",
+    "продажник", "менеджер по продаж", "озвучк", "иллюстратор", "моушн",
+    "3d-модел", "seo", "сеошник", "ассистент", "администратор", "рекрутер",
+    "hr-", "эйчар", "контент-менеджер", "сценарист", "фотограф", "бухгалтер",
+    "юрист", "переводчик", "оператор", "модератор", "менеджер маркетплейс",
 ]
 
 # Frontend/site-building vacancies are off-profile even when they mention
@@ -109,6 +117,31 @@ class MatchResult:
 # in the title — the body always mentions everything.
 _DIGEST_MARKER = "подборка заказов"
 
+_HASHTAG_LINE = re.compile(r"(?:#[\w_]+[\s,]*)+", re.UNICODE)
+
+
+def title_zone(text: str) -> str:
+    """The headline plus any hashtag-only lines that follow it.
+
+    Body lines must stay out: an ad titled "Графический дизайнер" often lists
+    "нейросети" among the nice-to-haves, and that must not cancel the veto.
+    """
+    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+    if not lines:
+        return ""
+    zone = [lines[0]]
+    for line in lines[1:]:
+        if not _HASHTAG_LINE.fullmatch(line):
+            break
+        zone.append(line)
+    return "\n".join(zone)
+
+
+def _has_core_signal(fragment: str) -> bool:
+    return any(
+        p.search(fragment) for cat in CORE_CATEGORIES for p in _CATEGORY_PATTERNS[cat]
+    )
+
 
 def match(text: str) -> MatchResult:
     if not text:
@@ -118,6 +151,14 @@ def match(text: str) -> MatchResult:
             return MatchResult(anti=True)
     first_line = text.split("\n", 1)[0]
     scan = first_line if _DIGEST_MARKER in first_line.lower() else text
+
+    # The headline names the role. An off-profile role there is decisive:
+    # a "Графический дизайнер" ad stays off-profile however much its body
+    # mentions neural networks or automation.
+    title = title_zone(scan)
+    if not _has_core_signal(title) and any(p.search(title) for p in _VETO_PATTERNS):
+        return MatchResult(anti=True)
+
     keywords: list[str] = []
     cat_hits: dict[str, int] = {}
     for cat, patterns in _CATEGORY_PATTERNS.items():

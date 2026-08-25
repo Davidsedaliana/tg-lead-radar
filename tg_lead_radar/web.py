@@ -14,7 +14,7 @@ import httpx
 
 from .card import LeadCard, render_html
 from .config import Settings, load_settings
-from .llm import generate_draft
+from .llm import judge_lead
 from .radar import build_card
 from .store import SeenStore
 from .webpreview import fetch_channel
@@ -22,6 +22,24 @@ from .webpreview import fetch_channel
 logger = logging.getLogger(__name__)
 
 BACKLOG_NOTIFY_LIMIT = 3
+STARS = {1: "⭐", 2: "⭐⭐", 3: "⭐⭐⭐"}
+
+
+def apply_llm(client: httpx.Client, settings: Settings, card: LeadCard) -> LeadCard | None:
+    """Precision stage: returns an enriched card, or None if the model says
+    this is not a lead. Model unavailable -> card passes through unchanged."""
+    verdict = judge_lead(client, settings.ollama_url, settings.ollama_model, card.text)
+    if verdict is None:
+        return card
+    if not verdict.relevant:
+        logger.info("LLM rejected %s: %s", card.link, verdict.reason or "not relevant")
+        return None
+    return replace(
+        card,
+        draft=verdict.draft or card.draft,
+        reason=verdict.reason,
+        fit=STARS.get(verdict.fit, card.fit),
+    )
 
 
 def send_via_bot(client: httpx.Client, token: str, user_id: int, card: LeadCard) -> None:
@@ -77,11 +95,10 @@ def poll_once(client: httpx.Client, store: SeenStore, settings: Settings) -> int
 
         for card in cards:
             if settings.llm_enabled:
-                draft = generate_draft(
-                    client, settings.ollama_url, settings.ollama_model, card.text
-                )
-                if draft:
-                    card = replace(card, draft=draft)
+                judged = apply_llm(client, settings, card)
+                if judged is None:
+                    continue
+                card = judged
             try:
                 send_via_bot(client, settings.bot_token, settings.notify_user_id, card)
                 sent += 1

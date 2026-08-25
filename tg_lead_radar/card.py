@@ -57,6 +57,7 @@ class LeadCard:
     draft: str
     published: str = ""  # ISO datetime
     fit: str = ""  # ⭐-rating of profile fit
+    reason: str = ""  # one-line "why this fits", filled by the LLM stage
 
     @property
     def emoji(self) -> str:
@@ -104,6 +105,8 @@ def render_plain(card: LeadCard) -> str:
     lines = [f"{card.emoji} {card.channel_title} · {card.tags}"]
     if card.meta_line:
         lines.append(card.meta_line)
+    if card.reason:
+        lines.append(f"🎯 {card.reason}")
     if card.budget:
         lines.append(f"💰 {card.budget}")
     lines += [
@@ -124,6 +127,8 @@ def render_html(card: LeadCard) -> str:
     lines = [f'{card.emoji} <b><a href="{card.link}">{title}</a></b> · {card.tags}']
     if card.meta_line:
         lines.append(card.meta_line)
+    if card.reason:
+        lines.append(f"🎯 <i>{html.escape(card.reason)}</i>")
     if card.budget:
         lines.append(f"💰 {html.escape(card.budget)}")
     lines += [

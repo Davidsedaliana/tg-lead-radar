@@ -119,6 +119,33 @@ class TestMatch:
         text = "Разработчик ботов, проектная работа, оплата за задачу (не оклад)"
         assert match(text).matched
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "👔 SEO-специалист (Middle)\nЗадачи: автоматизация отчётов, работа с ИИ",
+            "👔 Графический дизайнер\nБудет плюсом: нейросети, автоматизация макетов",
+            "#ищу #смм #контент\nПисать сценарии рилс в связке с ИИ",
+            "Ассистент-администратор\nВести таблицы, автоматизировать отчёты",
+            "#whois #дизайнер #вебдизайнер\nДоработка макетов, интеграция с API",
+        ],
+    )
+    def test_offprofile_role_in_title_vetoes_whole_post(self, text):
+        assert not match(text).matched
+
+    def test_core_signal_in_title_survives_veto_word(self):
+        assert match("Нужен бот для дизайнера\nАвтопостинг макетов в канал").matched
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Ищу себе позицию Project Manager, опыт 5 лет",
+            "Ищете Fullstack-разработчика? Мы создаем решения для бизнеса",
+            "Наша студия разрабатывает ботов под ключ",
+        ],
+    )
+    def test_agency_and_jobseeker_selfpromo_rejected(self, text):
+        assert not match(text).matched
+
     def test_categories_ordered_by_dominance(self):
         text = "Автоматизация: скрипт выгрузки из CRM в Excel, отчёты. Python"
         r = match(text)
