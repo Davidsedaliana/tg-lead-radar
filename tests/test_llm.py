@@ -3,10 +3,11 @@ import json
 import httpx
 import pytest
 
+import tg_lead_radar.llm as llm
 import tg_lead_radar.web as web
 from tg_lead_radar.card import LeadCard
 from tg_lead_radar.config import Settings
-from tg_lead_radar.llm import Judgement, judge_lead
+from tg_lead_radar.llm import Judgement, enrich_card, judge_lead
 from tg_lead_radar.store import SeenStore
 from tg_lead_radar.webpreview import Post
 
@@ -116,38 +117,38 @@ def make_card() -> LeadCard:
     )
 
 
-class TestApplyLlm:
+class TestEnrichCard:
     def settings(self) -> Settings:
         return Settings(bot_token="1:a", notify_user_id=1, llm_enabled=True, _env_file=None)
 
     def test_enriches_card(self, monkeypatch):
         monkeypatch.setattr(
-            web,
+            llm,
             "judge_lead",
             lambda *a, **k: Judgement(True, 3, "Профильная задача", "Персональный отклик"),
         )
-        card = web.apply_llm(httpx.Client(), self.settings(), make_card())
+        card = enrich_card(httpx.Client(), self.settings(), make_card())
         assert card.draft == "Персональный отклик"
         assert card.reason == "Профильная задача"
         assert card.fit == "⭐⭐⭐"
 
     def test_rejection_drops_card(self, monkeypatch):
         monkeypatch.setattr(
-            web, "judge_lead", lambda *a, **k: Judgement(False, 1, "не то", "")
+            llm, "judge_lead", lambda *a, **k: Judgement(False, 1, "не то", "")
         )
-        assert web.apply_llm(httpx.Client(), self.settings(), make_card()) is None
+        assert enrich_card(httpx.Client(), self.settings(), make_card()) is None
 
     def test_model_down_keeps_card(self, monkeypatch):
-        monkeypatch.setattr(web, "judge_lead", lambda *a, **k: None)
-        card = web.apply_llm(httpx.Client(), self.settings(), make_card())
+        monkeypatch.setattr(llm, "judge_lead", lambda *a, **k: None)
+        card = enrich_card(httpx.Client(), self.settings(), make_card())
         assert card.draft == "ШАБЛОН"
         assert card.fit == "⭐⭐"
 
     def test_empty_draft_falls_back_to_template(self, monkeypatch):
         monkeypatch.setattr(
-            web, "judge_lead", lambda *a, **k: Judgement(True, 2, "ок", "")
+            llm, "judge_lead", lambda *a, **k: Judgement(True, 2, "ок", "")
         )
-        card = web.apply_llm(httpx.Client(), self.settings(), make_card())
+        card = enrich_card(httpx.Client(), self.settings(), make_card())
         assert card.draft == "ШАБЛОН"
 
 
@@ -171,7 +172,7 @@ def test_order_feed_sends_post_keywords_would_miss(monkeypatch, store):
     sent = []
     monkeypatch.setattr(web, "send_via_bot", lambda c, t, u, card: sent.append(card))
     monkeypatch.setattr(
-        web, "judge_lead", lambda *a, **k: Judgement(True, 3, "Бэкенд на Python", "Отклик")
+        llm, "judge_lead", lambda *a, **k: Judgement(True, 3, "Бэкенд на Python", "Отклик")
     )
 
     assert web.poll_once(httpx.Client(), store, settings) == 1
@@ -186,7 +187,7 @@ def test_ordinary_channel_still_gated_by_keywords(monkeypatch, store):
     monkeypatch.setattr(web, "fetch_channel", lambda c, ch: [Post("chan", 1, WMS)])
     sent = []
     monkeypatch.setattr(web, "send_via_bot", lambda c, t, u, card: sent.append(card))
-    monkeypatch.setattr(web, "judge_lead", lambda *a, **k: Judgement(True, 3, "x", "y"))
+    monkeypatch.setattr(llm, "judge_lead", lambda *a, **k: Judgement(True, 3, "x", "y"))
 
     assert web.poll_once(httpx.Client(), store, settings) == 0
 
@@ -202,7 +203,7 @@ def test_poll_skips_llm_rejected_posts(monkeypatch, store):
     sent = []
     monkeypatch.setattr(web, "send_via_bot", lambda c, t, u, card: sent.append(card))
     monkeypatch.setattr(
-        web, "judge_lead", lambda *a, **k: Judgement(False, 1, "реклама", "")
+        llm, "judge_lead", lambda *a, **k: Judgement(False, 1, "реклама", "")
     )
 
     assert web.poll_once(httpx.Client(), store, settings) == 0

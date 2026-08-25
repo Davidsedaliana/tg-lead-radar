@@ -9,5 +9,10 @@ logDir = projectDir & "\data"
 If Not fso.FolderExists(logDir) Then fso.CreateFolder(logDir)
 
 shell.CurrentDirectory = projectDir
-cmd = "cmd /c """"" & python & """ -u -m tg_lead_radar.web >> """ & logDir & "\radar.log"" 2>&1"""
+' Without this the log gets Cyrillic mangled by the console codepage.
+shell.Environment("PROCESS")("PYTHONIOENCODING") = "utf-8"
+shell.Environment("PROCESS")("PYTHONUTF8") = "1"
+' Userbot mode (tg_lead_radar) sees private chats and has no polling delay.
+' Without my.telegram.org credentials use tg_lead_radar.web instead.
+cmd = "cmd /c """"" & python & """ -u -m tg_lead_radar >> """ & logDir & "\radar.log"" 2>&1"""
 shell.Run cmd, 0, False

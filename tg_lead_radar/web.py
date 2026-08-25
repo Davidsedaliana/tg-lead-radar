@@ -9,7 +9,6 @@ so the backlog does not flood the chat.
 import logging
 import os
 import time
-from dataclasses import replace
 from pathlib import Path
 from typing import IO
 
@@ -17,7 +16,7 @@ import httpx
 
 from .card import LeadCard, age_hours, render_html
 from .config import Settings, load_settings
-from .llm import judge_lead
+from .llm import enrich_card
 from .radar import build_card
 from .store import SeenStore
 from .webpreview import fetch_channel
@@ -29,7 +28,6 @@ logger = logging.getLogger(__name__)
 # an answer, one from June is not.
 FIRST_POLL_MAX_AGE_HOURS = 48
 FIRST_POLL_MAX_CARDS = 10
-STARS = {1: "⭐", 2: "⭐⭐", 3: "⭐⭐⭐"}
 
 
 def trim_backlog(cards: list[LeadCard]) -> list[LeadCard]:
@@ -60,23 +58,6 @@ def acquire_single_instance_lock(path: str) -> IO[bytes]:
         handle.close()
         raise SystemExit("Радар уже запущен — второй экземпляр не нужен") from exc
     return handle
-
-
-def apply_llm(client: httpx.Client, settings: Settings, card: LeadCard) -> LeadCard | None:
-    """Precision stage: returns an enriched card, or None if the model says
-    this is not a lead. Model unavailable -> card passes through unchanged."""
-    verdict = judge_lead(client, settings.ollama_url, settings.ollama_model, card.text)
-    if verdict is None:
-        return card
-    if not verdict.relevant:
-        logger.info("LLM rejected %s: %s", card.link, verdict.reason or "not relevant")
-        return None
-    return replace(
-        card,
-        draft=verdict.draft or card.draft,
-        reason=verdict.reason,
-        fit=STARS.get(verdict.fit, card.fit),
-    )
 
 
 def send_via_bot(client: httpx.Client, token: str, user_id: int, card: LeadCard) -> None:
@@ -143,7 +124,7 @@ def poll_once(client: httpx.Client, store: SeenStore, settings: Settings) -> int
 
         for card in cards:
             if settings.llm_enabled:
-                judged = apply_llm(client, settings, card)
+                judged = enrich_card(client, settings, card)
                 if judged is None:
                     continue
                 card = judged

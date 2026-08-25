@@ -1,7 +1,12 @@
+import asyncio
 import logging
 
+import httpx
+
 from .card import LeadCard, fit_stars, message_link, render_plain
+from .config import Settings
 from .filters import match
+from .llm import enrich_card
 from .store import SeenStore
 from .templates import pick_draft
 
@@ -40,7 +45,13 @@ def build_card(
     )
 
 
-async def handle_event(event, store: SeenStore, notify_chat: str, client) -> bool:
+async def handle_event(
+    event,
+    store: SeenStore,
+    settings: Settings,
+    client,
+    http: httpx.Client | None = None,
+) -> bool:
     """Returns True when a card was sent."""
     text = event.raw_text or ""
     if not text:
@@ -50,13 +61,20 @@ async def handle_event(event, store: SeenStore, notify_chat: str, client) -> boo
         return False
     chat = await event.get_chat()
     date = getattr(event.message, "date", None)
+    username = getattr(chat, "username", None)
+    # A chat carries orders in plain speech, so keywords would gate too much;
+    # let the model decide there, exactly as for the order feeds.
+    judge_all = settings.llm_enabled and (
+        username in settings.order_feed_list() or getattr(chat, "megagroup", False)
+    )
     card = build_card(
         text=text,
         chat_id=chat_id,
         msg_id=event.id,
-        chat_title=getattr(chat, "title", None) or getattr(chat, "username", "?") or "?",
-        chat_username=getattr(chat, "username", None),
+        chat_title=getattr(chat, "title", None) or username or "?",
+        chat_username=username,
         published=date.isoformat() if date else "",
+        force=judge_all,
     )
     if card is None:
         return False
@@ -65,7 +83,14 @@ async def handle_event(event, store: SeenStore, notify_chat: str, client) -> boo
         return False
     store.mark_text_seen(text)
     store.mark_seen(chat_id, event.id, card.categories)
-    await client.send_message(notify_chat, render_plain(card), link_preview=False)
+
+    if settings.llm_enabled and http is not None:
+        # judge_lead blocks on HTTP; keep the Telethon event loop free.
+        card = await asyncio.to_thread(enrich_card, http, settings, card)
+        if card is None:
+            return False
+
+    await client.send_message(settings.notify_chat, render_plain(card), link_preview=False)
     logger.info(
         "Lead #%s in %s -> notified (%s)", event.id, chat_id, ",".join(card.categories)
     )

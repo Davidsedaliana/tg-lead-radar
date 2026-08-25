@@ -11,11 +11,16 @@ the keyword verdict and the template draft. Nothing leaves the machine.
 
 import json
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import httpx
 
+from .card import LeadCard
+from .config import Settings
+
 logger = logging.getLogger(__name__)
+
+STARS = {1: "⭐", 2: "⭐⭐", 3: "⭐⭐⭐"}
 
 PROFILE = """Давид — Python-разработчик на фрилансе.
 
@@ -98,6 +103,25 @@ DRAFT_PROMPT = f"""{PROFILE}
 - приветствие не длиннее «Здравствуйте!», дальше сразу по делу
 - сплошным текстом, без пустых строк, заголовков и списков
 - в ответе только текст отклика, без кавычек и пояснений"""
+
+
+def enrich_card(
+    client: httpx.Client, settings: Settings, card: LeadCard
+) -> LeadCard | None:
+    """Precision stage shared by both modes: returns an enriched card, or None
+    if the model says this is not a lead. Model unavailable -> card unchanged."""
+    verdict = judge_lead(client, settings.ollama_url, settings.ollama_model, card.text)
+    if verdict is None:
+        return card
+    if not verdict.relevant:
+        logger.info("LLM rejected %s: %s", card.link, verdict.reason or "not relevant")
+        return None
+    return replace(
+        card,
+        draft=verdict.draft or card.draft,
+        reason=verdict.reason,
+        fit=STARS.get(verdict.fit, card.fit),
+    )
 
 
 @dataclass(frozen=True)
