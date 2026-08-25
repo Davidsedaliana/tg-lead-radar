@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     # --- optional local LLM (Ollama) for personalised drafts ---
     llm_enabled: bool = False
     ollama_url: str = "http://127.0.0.1:11434"
-    ollama_model: str = "qwen2.5:7b"
+    ollama_model: str = "qwen2.5:14b"
 
     # Channels that publish nothing but orders. Their posts skip the keyword
     # gate and go straight to the model, so a well-paid order phrased in words
