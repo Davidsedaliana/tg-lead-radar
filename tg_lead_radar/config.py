@@ -3,6 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # Absent on purpose: freelansim_ru (dead since February 2026, Habr Freelance
 # shut down) and zakazy_freelance (one repeated ad post, no real orders).
 DEFAULT_CHANNELS = (
+    "freelance_dev_work,fa_devolopers,job_programming_apps_chatgpt_n8n,"
     "it_zakazy,freelance_zakazy,digitaltender,freelancetaverna,webfrl,"
     "Remoteit,freelead,slavelancers"
 )
@@ -32,7 +33,10 @@ class Settings(BaseSettings):
     # Channels that publish nothing but orders. Their posts skip the keyword
     # gate and go straight to the model, so a well-paid order phrased in words
     # our stems miss is not lost. Ignored when the LLM is off.
-    order_feeds: str = "it_zakazy,freelance_zakazy"
+    order_feeds: str = (
+        "it_zakazy,freelance_zakazy,freelance_dev_work,fa_devolopers,"
+        "job_programming_apps_chatgpt_n8n"
+    )
 
     def order_feed_list(self) -> list[str]:
         return _split(self.order_feeds)

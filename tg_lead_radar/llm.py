@@ -205,7 +205,10 @@ def judge_lead(
     try:
         raw = _chat(
             client, base_url, model, JUDGE_PROMPT,
-            f"Текст поста:\n{post_text}", timeout, as_json=True, temperature=0.2,
+            # Temperature 0: at the decision boundary any sampling makes the
+            # same post pass one minute and get rejected the next, and a
+            # rejected lead is never seen again. Drafts still sample.
+            f"Текст поста:\n{post_text}", timeout, as_json=True, temperature=0.0,
         )
         data = json.loads(raw) if raw else None
     except Exception:
