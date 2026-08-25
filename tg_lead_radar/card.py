@@ -1,7 +1,7 @@
 import html
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 EXCERPT_LIMIT = 600
 
@@ -39,6 +39,20 @@ def fit_stars(categories: list[str], cat_hits: dict[str, int]) -> str:
     return "⭐"
 
 
+def age_hours(iso: str, now: datetime | None = None) -> float | None:
+    """Hours since publication, or None when the timestamp is unusable."""
+    if not iso:
+        return None
+    try:
+        published = datetime.fromisoformat(iso)
+    except ValueError:
+        return None
+    if published.tzinfo is None:
+        published = published.replace(tzinfo=UTC)
+    now = now or datetime.now(UTC)
+    return (now - published).total_seconds() / 3600
+
+
 def format_published(iso: str) -> str:
     if not iso:
         return ""
@@ -47,6 +61,7 @@ def format_published(iso: str) -> str:
     except ValueError:
         return ""
     return dt.astimezone(_MSK).strftime("%d.%m %H:%M мск")
+
 
 CATEGORY_EMOJI = {
     "fix": "🔧",

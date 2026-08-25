@@ -15,7 +15,7 @@ from typing import IO
 
 import httpx
 
-from .card import LeadCard, render_html
+from .card import LeadCard, age_hours, render_html
 from .config import Settings, load_settings
 from .llm import judge_lead
 from .radar import build_card
@@ -24,8 +24,17 @@ from .webpreview import fetch_channel
 
 logger = logging.getLogger(__name__)
 
-BACKLOG_NOTIFY_LIMIT = 3
+# First poll of a channel: its whole preview is new. Send what is still
+# actionable rather than a fixed few — an order from two days ago is worth
+# an answer, one from June is not.
+FIRST_POLL_MAX_AGE_HOURS = 48
+FIRST_POLL_MAX_CARDS = 10
 STARS = {1: "⭐", 2: "⭐⭐", 3: "⭐⭐⭐"}
+
+
+def trim_backlog(cards: list[LeadCard]) -> list[LeadCard]:
+    fresh = [c for c in cards if (age_hours(c.published) or 0) <= FIRST_POLL_MAX_AGE_HOURS]
+    return fresh[-FIRST_POLL_MAX_CARDS:]
 
 
 def acquire_single_instance_lock(path: str) -> IO[bytes]:
@@ -125,10 +134,12 @@ def poll_once(client: httpx.Client, store: SeenStore, settings: Settings) -> int
             store.mark_text_seen(post.text)
             cards.append(card)
 
-        if first_time and len(cards) > BACKLOG_NOTIFY_LIMIT:
-            logger.info("@%s: first poll, trimming backlog %d -> %d",
-                        channel, len(cards), BACKLOG_NOTIFY_LIMIT)
-            cards = cards[-BACKLOG_NOTIFY_LIMIT:]
+        if first_time:
+            trimmed = trim_backlog(cards)
+            if len(trimmed) != len(cards):
+                logger.info("@%s: first poll, keeping %d of %d (fresh only)",
+                            channel, len(trimmed), len(cards))
+            cards = trimmed
 
         for card in cards:
             if settings.llm_enabled:

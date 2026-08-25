@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 import httpx
 import pytest
 
@@ -37,15 +39,42 @@ def run_poll(monkeypatch, store, posts, sent):
     return web.poll_once(httpx.Client(), store, make_settings())
 
 
-def test_first_poll_trims_backlog(monkeypatch, store):
+def dated_post(msg_id: int, hours_ago: float) -> Post:
+    when = datetime.now(UTC) - timedelta(hours=hours_ago)
+    return Post(
+        channel="chan",
+        msg_id=msg_id,
+        text=f"Нужен бот для заявок №{msg_id}",
+        published=when.isoformat(),
+    )
+
+
+def test_first_poll_keeps_fresh_drops_stale(monkeypatch, store):
     sent = []
-    posts = [lead_post(i) for i in range(1, 7)]  # 6 matching leads
-    count = run_poll(monkeypatch, store, posts, sent)
-    assert count == web.BACKLOG_NOTIFY_LIMIT
-    # freshest ids survive the trim
-    assert [card.link for _, card in sent] == [
-        "https://t.me/chan/4", "https://t.me/chan/5", "https://t.me/chan/6"
+    posts = [
+        dated_post(1, 30 * 24),  # month-old
+        dated_post(2, 72),  # three days
+        dated_post(3, 5),  # today
+        dated_post(4, 1),
     ]
+    count = run_poll(monkeypatch, store, posts, sent)
+    assert count == 2
+    assert [card.link for _, card in sent] == [
+        "https://t.me/chan/3", "https://t.me/chan/4"
+    ]
+
+
+def test_first_poll_caps_a_flood(monkeypatch, store):
+    sent = []
+    posts = [dated_post(i, 1) for i in range(1, 16)]  # 15 fresh leads
+    count = run_poll(monkeypatch, store, posts, sent)
+    assert count == web.FIRST_POLL_MAX_CARDS
+
+
+def test_posts_without_timestamp_are_kept(monkeypatch, store):
+    sent = []
+    count = run_poll(monkeypatch, store, [lead_post(1), lead_post(2)], sent)
+    assert count == 2
 
 
 def test_second_poll_only_new_posts(monkeypatch, store):
