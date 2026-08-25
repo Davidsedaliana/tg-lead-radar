@@ -77,6 +77,8 @@ def run() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    # httpx logs full request URLs — for Bot API that includes the token.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     settings = load_settings()
     if not settings.bot_token or not settings.notify_user_id:
         raise SystemExit("Web mode needs BOT_TOKEN and NOTIFY_USER_ID in .env")
