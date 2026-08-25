@@ -10,8 +10,11 @@ CATEGORIES: dict[str, list[str]] = {
         "почин", "исправ", "доработ", "доделать", "ошибк", "баг",
         "не работает", "перестал работа", "падает", "сломал",
     ],
+    # NB: no standalone "telegram"/"телеграм" — SMM posts ("ведение
+    # телеграм-канала") and contact lines ("Телеграм: @hr") ruin precision.
     "bot": [
-        "бот", "чат-бот", "чатбот", "telegram", "телеграм", "aiogram", "tg-бот",
+        "бот", "чат-бот", "чатбот", "aiogram", "tg-бот",
+        "телеграм-бот", "telegram-бот", "telegram bot", "телеграм бот",
     ],
     "ai": [
         "распознаван", "whisper", "транскриб", "расшифров", "нейросет",
@@ -74,23 +77,31 @@ class MatchResult:
         return bool(self.categories) and not self.anti
 
 
+# Digest channels (Хабр Фриланс) post batches titled
+# "Подборка заказов в категории ...". The relevant signal is the category
+# in the title — the body always mentions everything.
+_DIGEST_MARKER = "подборка заказов"
+
+
 def match(text: str) -> MatchResult:
     if not text:
         return MatchResult()
     for pattern in _ANTI_PATTERNS:
         if pattern.search(text):
             return MatchResult(anti=True)
+    first_line = text.split("\n", 1)[0]
+    scan = first_line if _DIGEST_MARKER in first_line.lower() else text
     categories: list[str] = []
     keywords: list[str] = []
     for cat, patterns in _CATEGORY_PATTERNS.items():
         for p in patterns:
-            m = p.search(text)
+            m = p.search(scan)
             if m:
                 if cat not in categories:
                     categories.append(cat)
                 keywords.append(m.group(0).lower())
     strong = [c for c in categories if c not in WEAK_CATEGORIES]
-    if not strong and any(p.search(text) for p in _VETO_PATTERNS):
+    if not strong and any(p.search(scan) for p in _VETO_PATTERNS):
         # A design/marketing/etc. post that merely mentions Python or an API.
         return MatchResult(anti=True)
     return MatchResult(categories=categories, keywords=keywords)

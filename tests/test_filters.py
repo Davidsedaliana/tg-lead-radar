@@ -77,6 +77,30 @@ class TestMatch:
     def test_weak_only_without_veto_passes(self):
         assert match("Ищем разработчика на Python, проектная работа").matched
 
+    def test_smm_post_mentioning_telegram_channel_rejected(self):
+        assert not match("Ищут SMM-специалиста: ведение телеграм-канала, контент").matched
+
+    def test_contact_line_telegram_does_not_fire(self):
+        r = match("Вакансия: React-разработчик. Телеграм: @hr_contact")
+        assert not r.matched
+
+    def test_telegram_bot_order_still_passes(self):
+        assert match("Нужен телеграм-бот для магазина").matched
+
+    def test_digest_relevant_category_passes(self):
+        text = (
+            "Подборка заказов в категории Разработка (Боты и парсинг данных):\n"
+            "1. Сверстать лендинг — 5000р\n2. Дизайн логотипа — 3000р"
+        )
+        assert match(text).matched
+
+    def test_digest_irrelevant_category_rejected(self):
+        text = (
+            "Подборка заказов в категории Разработка (Фронтенд):\n"
+            "1. Доработать скрипт корзины — 5000р\n2. Бот для сайта — 3000р"
+        )
+        assert not match(text).matched
+
     def test_keywords_reported(self):
         r = match("Нужен бот и парсер на Python")
         assert "бот" in r.keywords

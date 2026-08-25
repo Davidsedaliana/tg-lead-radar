@@ -1,6 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-DEFAULT_CHANNELS = "Remoteit,digitaltender,webfrl,freelead,slavelancers"
+DEFAULT_CHANNELS = "Remoteit,digitaltender,webfrl,freelead,slavelancers,freelansim_ru,freelancetaverna"
 
 
 class Settings(BaseSettings):
@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     # Notifications go through a regular bot (@BotFather token) to your user id.
     bot_token: str = ""
     notify_user_id: int = 0
-    web_channels: str = "Remoteit,digitaltender,webfrl"
+    web_channels: str = "Remoteit,digitaltender,webfrl,freelansim_ru,freelancetaverna"
     poll_interval_seconds: int = 300
 
     # Comma-separated channel/chat usernames (without @).
