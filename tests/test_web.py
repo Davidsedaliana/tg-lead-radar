@@ -64,6 +64,26 @@ def test_non_lead_posts_marked_but_not_sent(monkeypatch, store):
     assert store.is_seen("chan", 5)
 
 
+class TestSingleInstanceLock:
+    def test_second_acquire_refuses(self, tmp_path):
+        path = str(tmp_path / "radar.lock")
+        first = web.acquire_single_instance_lock(path)
+        try:
+            with pytest.raises(SystemExit):
+                web.acquire_single_instance_lock(path)
+        finally:
+            first.close()
+
+    def test_lock_is_reusable_after_release(self, tmp_path):
+        path = str(tmp_path / "radar.lock")
+        web.acquire_single_instance_lock(path).close()
+        web.acquire_single_instance_lock(path).close()
+
+    def test_creates_missing_directory(self, tmp_path):
+        handle = web.acquire_single_instance_lock(str(tmp_path / "sub" / "radar.lock"))
+        handle.close()
+
+
 def test_repeated_ad_text_notified_once(monkeypatch, store):
     """A channel that reposts the same ad must not produce a card each time."""
     sent = []

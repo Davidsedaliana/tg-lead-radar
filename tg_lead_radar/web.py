@@ -7,8 +7,11 @@ so the backlog does not flood the chat.
 """
 
 import logging
+import os
 import time
 from dataclasses import replace
+from pathlib import Path
+from typing import IO
 
 import httpx
 
@@ -23,6 +26,31 @@ logger = logging.getLogger(__name__)
 
 BACKLOG_NOTIFY_LIMIT = 3
 STARS = {1: "⭐", 2: "⭐⭐", 3: "⭐⭐⭐"}
+
+
+def acquire_single_instance_lock(path: str) -> IO[bytes]:
+    """Autostart plus a manual run would otherwise notify about every lead
+    twice. The lock is held by the OS on an open file, so it disappears with
+    the process — no stale lock file survives a crash. (A loopback port would
+    be simpler, but Hyper-V/Docker reserve wide port ranges on Windows and
+    binding inside them fails.)"""
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    # Deliberately not a context manager: the handle must outlive this call —
+    # closing it would release the lock immediately.
+    handle = open(path, "a+b")  # noqa: SIM115
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as exc:
+        handle.close()
+        raise SystemExit("Радар уже запущен — второй экземпляр не нужен") from exc
+    return handle
 
 
 def apply_llm(client: httpx.Client, settings: Settings, card: LeadCard) -> LeadCard | None:
@@ -126,6 +154,7 @@ def run() -> None:
     settings = load_settings()
     if not settings.bot_token or not settings.notify_user_id:
         raise SystemExit("Web mode needs BOT_TOKEN and NOTIFY_USER_ID in .env")
+    lock = acquire_single_instance_lock(str(Path(settings.db_path).with_name("radar.lock")))
     store = SeenStore(settings.db_path)
     logger.info(
         "Web radar up: %s, every %ss", settings.web_channel_list(), settings.poll_interval_seconds
@@ -141,6 +170,7 @@ def run() -> None:
             logger.info("Stopped")
         finally:
             store.close()
+            lock.close()
 
 
 if __name__ == "__main__":

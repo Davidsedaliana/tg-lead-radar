@@ -39,6 +39,21 @@ python -m tg_lead_radar
 
 Чтобы радар видел приватные чаты, аккаунт должен в них состоять.
 
+## Автозапуск (Windows)
+
+`scripts/run_radar.vbs` запускает радар скрыто и пишет лог в `data/radar.log`.
+Достаточно положить ярлык на него в папку автозагрузки:
+
+```powershell
+$vbs = "$PWD\scripts\run_radar.vbs"
+$lnk = Join-Path ([Environment]::GetFolderPath('Startup')) "TG Lead Radar.lnk"
+$s = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
+$s.TargetPath = "wscript.exe"; $s.Arguments = "`"$vbs`""; $s.WorkingDirectory = "$PWD"; $s.Save()
+```
+
+Второй экземпляр запуститься не сможет: радар держит файловый замок
+`data/radar.lock`, так что автозапуск и ручной запуск не задвоят уведомления.
+
 ## Локальная модель как второй контур (опционально)
 
 Ключевые слова — дешёвый контур полноты: пропускают всё, что похоже на заказ.
