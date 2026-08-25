@@ -8,11 +8,13 @@ so the backlog does not flood the chat.
 
 import logging
 import time
+from dataclasses import replace
 
 import httpx
 
 from .card import LeadCard, render_html
 from .config import Settings, load_settings
+from .llm import generate_draft
 from .radar import build_card
 from .store import SeenStore
 from .webpreview import fetch_channel
@@ -74,6 +76,12 @@ def poll_once(client: httpx.Client, store: SeenStore, settings: Settings) -> int
             cards = cards[-BACKLOG_NOTIFY_LIMIT:]
 
         for card in cards:
+            if settings.llm_enabled:
+                draft = generate_draft(
+                    client, settings.ollama_url, settings.ollama_model, card.text
+                )
+                if draft:
+                    card = replace(card, draft=draft)
             try:
                 send_via_bot(client, settings.bot_token, settings.notify_user_id, card)
                 sent += 1

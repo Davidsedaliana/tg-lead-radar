@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     web_channels: str = "Remoteit,digitaltender,webfrl,freelansim_ru,freelancetaverna"
     poll_interval_seconds: int = 300
 
+    # --- optional local LLM (Ollama) for personalised drafts ---
+    llm_enabled: bool = False
+    ollama_url: str = "http://127.0.0.1:11434"
+    ollama_model: str = "qwen2.5:7b"
+
     # Comma-separated channel/chat usernames (without @).
     channels: str = DEFAULT_CHANNELS
     # Where to send lead cards; "me" = Saved Messages.
