@@ -27,6 +27,21 @@ def test_mark_twice_is_idempotent(store):
     assert store.count() == 1
 
 
+class TestTextDedup:
+    def test_unseen_then_seen(self, store):
+        assert not store.is_text_seen("Нужен бот")
+        store.mark_text_seen("Нужен бот")
+        assert store.is_text_seen("Нужен бот")
+
+    def test_whitespace_and_case_normalised(self, store):
+        store.mark_text_seen("Нужен  бот\nдля заявок")
+        assert store.is_text_seen("нужен бот для заявок")
+
+    def test_different_text_not_seen(self, store):
+        store.mark_text_seen("Нужен бот")
+        assert not store.is_text_seen("Нужен парсер")
+
+
 def test_survives_reopen(tmp_path):
     path = str(tmp_path / "seen.db")
     s1 = SeenStore(path)

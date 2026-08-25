@@ -23,8 +23,10 @@ def make_settings() -> Settings:
     )
 
 
-def lead_post(msg_id: int, text: str = "Нужен бот для заявок") -> Post:
-    return Post(channel="chan", msg_id=msg_id, text=text)
+def lead_post(msg_id: int, text: str | None = None) -> Post:
+    # Distinct text per post by default: identical texts are deduplicated,
+    # which is what test_repeated_ad_text_notified_once covers separately.
+    return Post(channel="chan", msg_id=msg_id, text=text or f"Нужен бот для заявок №{msg_id}")
 
 
 def run_poll(monkeypatch, store, posts, sent):
@@ -60,6 +62,17 @@ def test_non_lead_posts_marked_but_not_sent(monkeypatch, store):
     count = run_poll(monkeypatch, store, [Post("chan", 5, "Всем привет, как дела?")], sent)
     assert count == 0
     assert store.is_seen("chan", 5)
+
+
+def test_repeated_ad_text_notified_once(monkeypatch, store):
+    """A channel that reposts the same ad must not produce a card each time."""
+    sent = []
+    ad = "Нужен бот для заявок — реклама повторяется"
+    run_poll(monkeypatch, store, [lead_post(1, ad)], sent)
+    assert len(sent) == 1
+    sent.clear()
+    run_poll(monkeypatch, store, [lead_post(2, ad), lead_post(3, ad)], sent)
+    assert sent == []
 
 
 def test_fetch_failure_does_not_crash(monkeypatch, store):

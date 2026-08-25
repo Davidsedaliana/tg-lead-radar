@@ -52,6 +52,10 @@ async def handle_event(event, store: SeenStore, notify_chat: str, client) -> boo
     )
     if card is None:
         return False
+    if store.is_text_seen(text):
+        logger.info("Duplicate text in %s/%s — skipped", chat_id, event.id)
+        return False
+    store.mark_text_seen(text)
     store.mark_seen(chat_id, event.id, card.categories)
     await client.send_message(notify_chat, render_plain(card), link_preview=False)
     logger.info(

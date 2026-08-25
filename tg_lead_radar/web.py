@@ -85,8 +85,13 @@ def poll_once(client: httpx.Client, store: SeenStore, settings: Settings) -> int
                 published=post.published,
             )
             store.mark_seen(channel, post.msg_id, card.categories if card else [])
-            if card:
-                cards.append(card)
+            if not card:
+                continue
+            if store.is_text_seen(post.text):
+                logger.info("Duplicate text in @%s/%s — skipped", channel, post.msg_id)
+                continue
+            store.mark_text_seen(post.text)
+            cards.append(card)
 
         if first_time and len(cards) > BACKLOG_NOTIFY_LIMIT:
             logger.info("@%s: first poll, trimming backlog %d -> %d",

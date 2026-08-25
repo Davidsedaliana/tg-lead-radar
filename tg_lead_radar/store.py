@@ -1,3 +1,5 @@
+import hashlib
+import re
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,9 +14,20 @@ CREATE TABLE IF NOT EXISTS seen (
     created_at TEXT NOT NULL,
     PRIMARY KEY (chat_id, msg_id)
 );
+CREATE TABLE IF NOT EXISTS seen_text (
+    text_hash TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL
+);
 """
 
 ChatKey = int | str
+
+
+def text_hash(text: str) -> str:
+    """Hash of the normalised text, so a repeated ad (or the same order
+    cross-posted to several channels) is notified about only once."""
+    normalised = re.sub(r"\s+", " ", text).strip().lower()
+    return hashlib.sha256(normalised.encode("utf-8")).hexdigest()
 
 
 class SeenStore:
@@ -46,6 +59,20 @@ class SeenStore:
             "INSERT OR IGNORE INTO seen (chat_id, msg_id, categories, created_at) "
             "VALUES (?, ?, ?, ?)",
             (chat_id, msg_id, ",".join(categories), now),
+        )
+        self._conn.commit()
+
+    def is_text_seen(self, text: str) -> bool:
+        cur = self._conn.execute(
+            "SELECT 1 FROM seen_text WHERE text_hash = ?", (text_hash(text),)
+        )
+        return cur.fetchone() is not None
+
+    def mark_text_seen(self, text: str) -> None:
+        now = datetime.now(UTC).isoformat(timespec="seconds")
+        self._conn.execute(
+            "INSERT OR IGNORE INTO seen_text (text_hash, created_at) VALUES (?, ?)",
+            (text_hash(text), now),
         )
         self._conn.commit()
 
