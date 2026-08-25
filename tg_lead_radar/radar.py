@@ -15,11 +15,19 @@ def build_card(
     chat_title: str,
     chat_username: str | None,
     published: str = "",
+    force: bool = False,
 ) -> LeadCard | None:
     """Pure decision core: returns a LeadCard for a lead, or None.
-    Separated from Telethon so it is fully testable."""
+    Separated from Telethon so it is fully testable.
+
+    `force` builds a card even when the keywords say no — used for order-feed
+    channels, where the LLM stage makes the actual call.
+    """
     result = match(text)
-    if not result.matched:
+    if not result.matched and not force:
+        return None
+    if result.anti and force:
+        # Ads and self-promo stay rejected even in an order feed.
         return None
     return LeadCard(
         channel_title=chat_title,

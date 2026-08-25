@@ -72,6 +72,9 @@ def poll_once(client: httpx.Client, store: SeenStore, settings: Settings) -> int
             continue
 
         first_time = not store.has_chat(channel)
+        # In an order feed every post is a real order, so the keyword gate only
+        # loses leads phrased in words our stems miss — let the model judge all.
+        judge_all = settings.llm_enabled and channel in settings.order_feed_list()
         cards: list[LeadCard] = []
         for post in sorted(posts, key=lambda p: p.msg_id):
             if store.is_seen(channel, post.msg_id):
@@ -83,6 +86,7 @@ def poll_once(client: httpx.Client, store: SeenStore, settings: Settings) -> int
                 chat_title=f"@{channel}",
                 chat_username=channel,
                 published=post.published,
+                force=judge_all,
             )
             store.mark_seen(channel, post.msg_id, card.categories if card else [])
             if not card:

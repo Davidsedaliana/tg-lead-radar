@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     ollama_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen2.5:7b"
 
+    # Channels that publish nothing but orders. Their posts skip the keyword
+    # gate and go straight to the model, so a well-paid order phrased in words
+    # our stems miss is not lost. Ignored when the LLM is off.
+    order_feeds: str = "it_zakazy,freelance_zakazy"
+
+    def order_feed_list(self) -> list[str]:
+        return _split(self.order_feeds)
+
     # Comma-separated channel/chat usernames (without @).
     channels: str = DEFAULT_CHANNELS
     # Where to send lead cards; "me" = Saved Messages.

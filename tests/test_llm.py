@@ -126,6 +126,40 @@ def store(tmp_path):
     s.close()
 
 
+def test_order_feed_sends_post_keywords_would_miss(monkeypatch, store):
+    settings = Settings(
+        bot_token="1:a", notify_user_id=42, web_channels="feed",
+        order_feeds="feed", llm_enabled=True, _env_file=None,
+    )
+    # No keyword in this text; only the order-feed bypass lets it reach the model.
+    monkeypatch.setattr(
+        web, "fetch_channel", lambda c, ch: [Post("feed", 1, "Разработка WMS для склада")]
+    )
+    sent = []
+    monkeypatch.setattr(web, "send_via_bot", lambda c, t, u, card: sent.append(card))
+    monkeypatch.setattr(
+        web, "judge_lead", lambda *a, **k: Judgement(True, 3, "Бэкенд на Python", "Отклик")
+    )
+
+    assert web.poll_once(httpx.Client(), store, settings) == 1
+    assert sent[0].reason == "Бэкенд на Python"
+
+
+def test_ordinary_channel_still_gated_by_keywords(monkeypatch, store):
+    settings = Settings(
+        bot_token="1:a", notify_user_id=42, web_channels="chan",
+        order_feeds="feed", llm_enabled=True, _env_file=None,
+    )
+    monkeypatch.setattr(
+        web, "fetch_channel", lambda c, ch: [Post("chan", 1, "Разработка WMS для склада")]
+    )
+    sent = []
+    monkeypatch.setattr(web, "send_via_bot", lambda c, t, u, card: sent.append(card))
+    monkeypatch.setattr(web, "judge_lead", lambda *a, **k: Judgement(True, 3, "x", "y"))
+
+    assert web.poll_once(httpx.Client(), store, settings) == 0
+
+
 def test_poll_skips_llm_rejected_posts(monkeypatch, store):
     settings = Settings(
         bot_token="1:a", notify_user_id=42, web_channels="chan",
