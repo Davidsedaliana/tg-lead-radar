@@ -53,6 +53,30 @@ class TestMatch:
     def test_irrelevant(self, text):
         assert not match(text).matched
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Курс по Python со скидкой 50%! erid: 2VtzqxK",
+            "Розыгрыш подписки! Подпишись и участвуй",
+            "Бесплатный урок: автоматизация в Excel. Регистрируйся по ссылке",
+            "Интенсив по нейросетям, промокод BOT10",
+        ],
+    )
+    def test_ads_are_rejected(self, text):
+        assert not match(text).matched
+
+    def test_offtopic_with_weak_keyword_is_rejected(self):
+        # marketing post that merely mentions an API
+        assert not match("Ищем таргетолога со знанием API рекламного кабинета").matched
+
+    def test_offtopic_with_strong_keyword_passes(self):
+        # a real dev order that also mentions design
+        r = match("Нужен телеграм-бот, дизайнер для логотипа уже есть")
+        assert r.matched
+
+    def test_weak_only_without_veto_passes(self):
+        assert match("Ищем разработчика на Python, проектная работа").matched
+
     def test_keywords_reported(self):
         r = match("Нужен бот и парсер на Python")
         assert "бот" in r.keywords

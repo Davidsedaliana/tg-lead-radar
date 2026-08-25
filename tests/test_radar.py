@@ -3,18 +3,17 @@ from tg_lead_radar.templates import DRAFTS
 
 
 def test_lead_produces_card_with_draft():
-    built = build_card(
+    card = build_card(
         text="Нужен телеграм-бот приёма заявок, бюджет 40к",
         chat_id=-1001,
         msg_id=10,
         chat_title="Диджитал Тендер",
         chat_username="digitaltender",
     )
-    assert built is not None
-    card, categories = built
-    assert "bot" in categories
-    assert "https://t.me/digitaltender/10" in card
-    assert DRAFTS["bot"] in card
+    assert card is not None
+    assert "bot" in card.categories
+    assert card.link == "https://t.me/digitaltender/10"
+    assert card.draft == DRAFTS["bot"]
 
 
 def test_non_lead_returns_none():

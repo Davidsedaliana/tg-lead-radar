@@ -30,7 +30,7 @@ def lead_post(msg_id: int, text: str = "Нужен бот для заявок") 
 def run_poll(monkeypatch, store, posts, sent):
     monkeypatch.setattr(web, "fetch_channel", lambda client, ch: posts)
     monkeypatch.setattr(
-        web, "send_via_bot", lambda client, token, uid, text: sent.append((uid, text))
+        web, "send_via_bot", lambda client, token, uid, card: sent.append((uid, card))
     )
     return web.poll_once(httpx.Client(), store, make_settings())
 
@@ -41,7 +41,9 @@ def test_first_poll_trims_backlog(monkeypatch, store):
     count = run_poll(monkeypatch, store, posts, sent)
     assert count == web.BACKLOG_NOTIFY_LIMIT
     # freshest ids survive the trim
-    assert all("t.me/chan/" in text for _, text in sent)
+    assert [card.link for _, card in sent] == [
+        "https://t.me/chan/4", "https://t.me/chan/5", "https://t.me/chan/6"
+    ]
 
 
 def test_second_poll_only_new_posts(monkeypatch, store):
@@ -50,7 +52,7 @@ def test_second_poll_only_new_posts(monkeypatch, store):
     sent.clear()
     count = run_poll(monkeypatch, store, [lead_post(1), lead_post(2)], sent)
     assert count == 1
-    assert "t.me/chan/2" in sent[0][1]
+    assert sent[0][1].link == "https://t.me/chan/2"
 
 
 def test_non_lead_posts_marked_but_not_sent(monkeypatch, store):

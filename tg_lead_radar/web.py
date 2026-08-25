@@ -11,6 +11,7 @@ import time
 
 import httpx
 
+from .card import LeadCard, render_html
 from .config import Settings, load_settings
 from .radar import build_card
 from .store import SeenStore
@@ -21,10 +22,18 @@ logger = logging.getLogger(__name__)
 BACKLOG_NOTIFY_LIMIT = 3
 
 
-def send_via_bot(client: httpx.Client, token: str, user_id: int, text: str) -> None:
+def send_via_bot(client: httpx.Client, token: str, user_id: int, card: LeadCard) -> None:
     resp = client.post(
         f"https://api.telegram.org/bot{token}/sendMessage",
-        json={"chat_id": user_id, "text": text, "disable_web_page_preview": True},
+        json={
+            "chat_id": user_id,
+            "text": render_html(card),
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+            "reply_markup": {
+                "inline_keyboard": [[{"text": "Открыть пост ↗", "url": card.link}]]
+            },
+        },
     )
     resp.raise_for_status()
 
@@ -43,20 +52,20 @@ def poll_once(client: httpx.Client, store: SeenStore, settings: Settings) -> int
             continue
 
         first_time = not store.has_chat(channel)
-        cards: list[str] = []
+        cards: list[LeadCard] = []
         for post in sorted(posts, key=lambda p: p.msg_id):
             if store.is_seen(channel, post.msg_id):
                 continue
-            built = build_card(
+            card = build_card(
                 text=post.text,
                 chat_id=0,
                 msg_id=post.msg_id,
                 chat_title=f"@{channel}",
                 chat_username=channel,
             )
-            store.mark_seen(channel, post.msg_id, built[1] if built else [])
-            if built:
-                cards.append(built[0])
+            store.mark_seen(channel, post.msg_id, card.categories if card else [])
+            if card:
+                cards.append(card)
 
         if first_time and len(cards) > BACKLOG_NOTIFY_LIMIT:
             logger.info("@%s: first poll, trimming backlog %d -> %d",

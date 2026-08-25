@@ -1,4 +1,35 @@
+import html
+from dataclasses import dataclass
+
 EXCERPT_LIMIT = 600
+
+CATEGORY_EMOJI = {
+    "fix": "🔧",
+    "bot": "🤖",
+    "ai": "🧠",
+    "automation": "⚙️",
+    "python": "🐍",
+}
+
+
+@dataclass(frozen=True)
+class LeadCard:
+    channel_title: str
+    link: str
+    text: str
+    categories: list[str]
+    draft: str
+
+    @property
+    def emoji(self) -> str:
+        for cat in self.categories:
+            if cat in CATEGORY_EMOJI:
+                return CATEGORY_EMOJI[cat]
+        return "🎯"
+
+    @property
+    def tags(self) -> str:
+        return " ".join(f"#{c}" for c in self.categories)
 
 
 def message_link(username: str | None, chat_id: int, msg_id: int) -> str:
@@ -16,14 +47,23 @@ def excerpt(text: str, limit: int = EXCERPT_LIMIT) -> str:
     return text[: limit - 1].rstrip() + "…"
 
 
-def format_card(
-    channel_title: str, link: str, text: str, categories: list[str], draft: str
-) -> str:
-    tags = " ".join(f"#{c}" for c in categories)
+def render_plain(card: LeadCard) -> str:
+    """Userbot mode: plain text into Saved Messages."""
     return (
-        f"🎯 {channel_title} · {tags}\n"
-        f"{link}\n\n"
-        f"{excerpt(text)}\n\n"
+        f"{card.emoji} {card.channel_title} · {card.tags}\n"
+        f"{card.link}\n\n"
+        f"{excerpt(card.text)}\n\n"
         f"— — — черновик отклика — — —\n\n"
-        f"{draft}"
+        f"{card.draft}"
+    )
+
+
+def render_html(card: LeadCard) -> str:
+    """Web mode: Bot API HTML with collapsible quotes."""
+    title = html.escape(card.channel_title)
+    return (
+        f'{card.emoji} <b><a href="{card.link}">{title}</a></b> · {card.tags}\n'
+        f"<blockquote expandable>{html.escape(excerpt(card.text))}</blockquote>\n"
+        f"✍️ <b>Черновик отклика</b>\n"
+        f"<blockquote expandable>{html.escape(card.draft)}</blockquote>"
     )

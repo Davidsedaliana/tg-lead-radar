@@ -19,17 +19,36 @@ CATEGORIES: dict[str, list[str]] = {
     ],
     "automation": [
         "автоматизац", "автоматизир", "скрипт", "парсер", "парсинг", "спарсить",
-        "интеграц", "api", "excel", "таблиц", "google sheets", "гугл таблиц",
+        "интеграц", "excel", "таблиц", "google sheets", "гугл таблиц",
         "отчёт", "отчет", "crm", "амо", "выгрузк", "рутин",
     ],
-    "python": ["python", "питон", "джанго", "django", "fastapi"],
+    # Weak signals: alone they pass, but a veto topic (design/marketing post
+    # that merely mentions them) knocks them out.
+    "python": ["python", "питон", "джанго", "django", "fastapi", "api"],
 }
+
+WEAK_CATEGORIES = {"python"}
 
 # Posts by other freelancers advertising themselves, CVs, etc.
 ANTI = [
     "ищу работу", "ищу заказ", "ищу проект", "резюме", "#резюме",
     "предлагаю услуги", "мои услуги", "возьму заказ", "выполню ваш",
     "готов взяться", "открыт к предложени", "#ищуработу",
+]
+
+# Ads: promo posts, courses, giveaways — the channels' bread, our noise.
+ADS = [
+    "erid", "#реклама", "промокод", "скидк", "розыгрыш", "вебинар",
+    "бесплатный урок", "бесплатный курс", "интенсив", "марафон",
+    "подписывайся", "подпишись", "запишись на курс", "набор на курс",
+    "регистрируйся", "по ссылке в шапке",
+]
+
+# Off-profile topics: if such a post matched only weak keywords, drop it.
+TOPIC_VETO = [
+    "дизайнер", "логотип", "smm", "смм", "таргетолог", "таргетированн",
+    "копирайт", "монтаж", "видеомонтаж", "маркетолог", "продажник",
+    "менеджер по продаж", "озвучк", "иллюстратор", "моушн", "3d-модел",
 ]
 
 
@@ -40,7 +59,8 @@ def _stem_pattern(stem: str) -> re.Pattern[str]:
 _CATEGORY_PATTERNS = {
     cat: [_stem_pattern(s) for s in stems] for cat, stems in CATEGORIES.items()
 }
-_ANTI_PATTERNS = [_stem_pattern(s) for s in ANTI]
+_ANTI_PATTERNS = [_stem_pattern(s) for s in ANTI + ADS]
+_VETO_PATTERNS = [_stem_pattern(s) for s in TOPIC_VETO]
 
 
 @dataclass(frozen=True)
@@ -69,4 +89,8 @@ def match(text: str) -> MatchResult:
                 if cat not in categories:
                     categories.append(cat)
                 keywords.append(m.group(0).lower())
+    strong = [c for c in categories if c not in WEAK_CATEGORIES]
+    if not strong and any(p.search(text) for p in _VETO_PATTERNS):
+        # A design/marketing/etc. post that merely mentions Python or an API.
+        return MatchResult(anti=True)
     return MatchResult(categories=categories, keywords=keywords)
