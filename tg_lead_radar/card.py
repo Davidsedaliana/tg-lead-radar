@@ -1,7 +1,43 @@
 import html
+import re
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 EXCERPT_LIMIT = 600
+
+_MSK = timezone(timedelta(hours=3))
+_BUDGET_RE = re.compile(r"вилка|бюджет|оплат|цена|стоимост|гонорар|₽|руб\b|\d{2,}\s?000", re.I)
+
+CORE_FIT = {"fix", "bot", "ai"}
+
+
+def extract_budget(text: str) -> str | None:
+    """First line that talks money — shown as the card's budget hint."""
+    for line in text.split("\n"):
+        if _BUDGET_RE.search(line):
+            line = line.strip()
+            return line[:90]
+    return None
+
+
+def fit_stars(categories: list[str], cat_hits: dict[str, int]) -> str:
+    if set(categories) & CORE_FIT:
+        return "⭐⭐⭐"
+    if cat_hits.get("automation", 0) >= 2:
+        return "⭐⭐⭐"
+    if "automation" in categories:
+        return "⭐⭐"
+    return "⭐"
+
+
+def format_published(iso: str) -> str:
+    if not iso:
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso)
+    except ValueError:
+        return ""
+    return dt.astimezone(_MSK).strftime("%d.%m %H:%M мск")
 
 CATEGORY_EMOJI = {
     "fix": "🔧",
@@ -19,6 +55,8 @@ class LeadCard:
     text: str
     categories: list[str]
     draft: str
+    published: str = ""  # ISO datetime
+    fit: str = ""  # ⭐-rating of profile fit
 
     @property
     def emoji(self) -> str:
@@ -30,6 +68,20 @@ class LeadCard:
     @property
     def tags(self) -> str:
         return " ".join(f"#{c}" for c in self.categories)
+
+    @property
+    def meta_line(self) -> str:
+        parts = []
+        published = format_published(self.published)
+        if published:
+            parts.append(f"🕐 {published}")
+        if self.fit:
+            parts.append(f"{self.fit} под профиль")
+        return " · ".join(parts)
+
+    @property
+    def budget(self) -> str | None:
+        return extract_budget(self.text)
 
 
 def message_link(username: str | None, chat_id: int, msg_id: int) -> str:
@@ -49,21 +101,34 @@ def excerpt(text: str, limit: int = EXCERPT_LIMIT) -> str:
 
 def render_plain(card: LeadCard) -> str:
     """Userbot mode: plain text into Saved Messages."""
-    return (
-        f"{card.emoji} {card.channel_title} · {card.tags}\n"
-        f"{card.link}\n\n"
-        f"{excerpt(card.text)}\n\n"
-        f"— — — черновик отклика — — —\n\n"
-        f"{card.draft}"
-    )
+    lines = [f"{card.emoji} {card.channel_title} · {card.tags}"]
+    if card.meta_line:
+        lines.append(card.meta_line)
+    if card.budget:
+        lines.append(f"💰 {card.budget}")
+    lines += [
+        card.link,
+        "",
+        excerpt(card.text),
+        "",
+        "— — — черновик отклика — — —",
+        "",
+        card.draft,
+    ]
+    return "\n".join(lines)
 
 
 def render_html(card: LeadCard) -> str:
     """Web mode: Bot API HTML with collapsible quotes."""
     title = html.escape(card.channel_title)
-    return (
-        f'{card.emoji} <b><a href="{card.link}">{title}</a></b> · {card.tags}\n'
-        f"<blockquote expandable>{html.escape(excerpt(card.text))}</blockquote>\n"
-        f"✍️ <b>Черновик отклика</b>\n"
-        f"<blockquote expandable>{html.escape(card.draft)}</blockquote>"
-    )
+    lines = [f'{card.emoji} <b><a href="{card.link}">{title}</a></b> · {card.tags}']
+    if card.meta_line:
+        lines.append(card.meta_line)
+    if card.budget:
+        lines.append(f"💰 {html.escape(card.budget)}")
+    lines += [
+        f"<blockquote expandable>{html.escape(excerpt(card.text))}</blockquote>",
+        "✍️ <b>Черновик отклика</b>",
+        f"<blockquote expandable>{html.escape(card.draft)}</blockquote>",
+    ]
+    return "\n".join(lines)

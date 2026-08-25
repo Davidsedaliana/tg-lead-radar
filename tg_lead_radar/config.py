@@ -1,6 +1,8 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-DEFAULT_CHANNELS = "Remoteit,digitaltender,webfrl,freelead,slavelancers,freelansim_ru,freelancetaverna"
+DEFAULT_CHANNELS = (
+    "Remoteit,digitaltender,webfrl,freelead,slavelancers,freelansim_ru,freelancetaverna"
+)
 
 
 class Settings(BaseSettings):

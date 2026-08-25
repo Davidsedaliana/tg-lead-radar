@@ -62,6 +62,7 @@ def poll_once(client: httpx.Client, store: SeenStore, settings: Settings) -> int
                 msg_id=post.msg_id,
                 chat_title=f"@{channel}",
                 chat_username=channel,
+                published=post.published,
             )
             store.mark_seen(channel, post.msg_id, card.categories if card else [])
             if card:

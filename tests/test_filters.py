@@ -101,6 +101,30 @@ class TestMatch:
         )
         assert not match(text).matched
 
+    def test_frontend_vacancy_with_api_mention_rejected(self):
+        text = (
+            "#вакансия #react #frontend Ищут Frontend-разработчика (React).\n"
+            "Задачи: редизайн, интеграция с API (Swagger), адаптация под SSR"
+        )
+        assert not match(text).matched
+
+    def test_bot_order_mentioning_frontend_passes(self):
+        assert match("Нужен телеграм-бот, фронтенд уже готов на React").matched
+
+    def test_staff_vacancy_rejected(self):
+        text = "Нужен разработчик ботов в штат, оклад 150к, ДМС, офис"
+        assert not match(text).matched
+
+    def test_project_work_with_staff_words_passes(self):
+        text = "Разработчик ботов, проектная работа, оплата за задачу (не оклад)"
+        assert match(text).matched
+
+    def test_categories_ordered_by_dominance(self):
+        text = "Автоматизация: скрипт выгрузки из CRM в Excel, отчёты. Python"
+        r = match(text)
+        assert r.categories[0] == "automation"
+        assert r.cat_hits["automation"] >= 4
+
     def test_keywords_reported(self):
         r = match("Нужен бот и парсер на Python")
         assert "бот" in r.keywords

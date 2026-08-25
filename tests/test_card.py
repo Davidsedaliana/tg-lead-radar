@@ -2,6 +2,7 @@ from tg_lead_radar.card import (
     CATEGORY_EMOJI,
     LeadCard,
     excerpt,
+    fit_stars,
     message_link,
     render_html,
     render_plain,
@@ -40,8 +41,12 @@ class TestExcerpt:
 
 
 class TestPickDraft:
-    def test_priority_fix_over_bot(self):
-        assert pick_draft(["bot", "fix"]) == DRAFTS["fix"]
+    def test_dominant_category_wins(self):
+        # the list arrives dominance-ordered from filters.match
+        assert pick_draft(["automation", "bot"]) == DRAFTS["automation"]
+
+    def test_unknown_category_falls_through(self):
+        assert pick_draft(["unknown", "fix"]) == DRAFTS["fix"]
 
     def test_all_priorities_have_drafts(self):
         assert set(PRIORITY) == set(DRAFTS)
@@ -59,6 +64,43 @@ class TestRenderPlain:
         assert "https://t.me/Remoteit/42" in text
         assert "черновик отклика" in text
         assert "Здравствуйте!" in text
+
+
+class TestMeta:
+    def test_published_formats_to_msk(self):
+        c = card(published="2026-08-24T14:20:00+00:00")
+        assert "24.08 17:20 мск" in c.meta_line
+
+    def test_bad_published_is_ignored(self):
+        assert card(published="not-a-date").meta_line == ""
+
+    def test_fit_shown(self):
+        c = card(fit="⭐⭐⭐")
+        assert "⭐⭐⭐ под профиль" in c.meta_line
+
+    def test_budget_extracted(self):
+        c = card(text="Нужен бот\nВилка: 8 000 – 15 000 ₽ за проект\nУдалённо")
+        assert c.budget == "Вилка: 8 000 – 15 000 ₽ за проект"
+        assert "💰" in render_html(c)
+
+    def test_no_budget_line_omitted(self):
+        c = card(text="Нужен бот, детали в лс")
+        assert c.budget is None
+        assert "💰" not in render_html(c)
+
+
+class TestFitStars:
+    def test_core_category_is_three_stars(self):
+        assert fit_stars(["bot"], {"bot": 1}) == "⭐⭐⭐"
+
+    def test_strong_automation_is_three_stars(self):
+        assert fit_stars(["automation"], {"automation": 3}) == "⭐⭐⭐"
+
+    def test_single_automation_hit_is_two_stars(self):
+        assert fit_stars(["automation"], {"automation": 1}) == "⭐⭐"
+
+    def test_weak_only_is_one_star(self):
+        assert fit_stars(["python"], {"python": 1}) == "⭐"
 
 
 class TestRenderHtml:

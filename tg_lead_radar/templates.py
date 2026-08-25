@@ -40,11 +40,15 @@ DRAFTS: dict[str, str] = {
     ),
 }
 
-# Which draft wins when several categories matched.
+# Fallback order; normally `categories` already comes dominance-ordered
+# (most keyword hits first) from filters.match.
 PRIORITY = ["fix", "bot", "ai", "automation", "python"]
 
 
 def pick_draft(categories: list[str]) -> str:
+    for cat in categories:
+        if cat in DRAFTS:
+            return DRAFTS[cat]
     for cat in PRIORITY:
         if cat in categories:
             return DRAFTS[cat]

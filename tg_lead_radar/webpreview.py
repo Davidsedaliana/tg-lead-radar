@@ -20,6 +20,7 @@ class Post:
     channel: str
     msg_id: int
     text: str
+    published: str = ""  # ISO datetime from the preview, if present
 
     @property
     def link(self) -> str:
@@ -27,36 +28,45 @@ class Post:
 
 
 class _PreviewParser(HTMLParser):
-    """Collects text of .tgme_widget_message_text inside .tgme_widget_message[data-post]."""
+    """Collects text and publish time of every .tgme_widget_message[data-post]."""
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.posts: list[Post] = []
         self._div_depth = 0
-        self._post: tuple[str, int] | None = None
-        self._post_depth = 0
+        # current widget state
+        self._widget: dict | None = None
+        self._widget_depth = 0
         self._text_parts: list[str] | None = None
         self._text_depth = 0
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attr = dict(attrs)
         if tag == "br":
             if self._text_parts is not None:
                 self._text_parts.append("\n")
             return
+        if tag == "time":
+            if self._widget is not None and attr.get("datetime"):
+                self._widget["published"] = attr["datetime"]
+            return
         if tag != "div":
             return
         self._div_depth += 1
-        attr = dict(attrs)
         classes = (attr.get("class") or "").split()
         data_post = attr.get("data-post") or ""
         if "tgme_widget_message" in classes and data_post:
             channel, _, raw_id = data_post.partition("/")
-            # A new widget always resets the context, valid id or not —
-            # otherwise its text would be attributed to the previous post.
-            self._post = (channel, int(raw_id)) if raw_id.isdigit() else None
-            self._post_depth = self._div_depth
+            if raw_id.isdigit():
+                self._widget = {
+                    "channel": channel, "msg_id": int(raw_id), "text": "", "published": ""
+                }
+            else:
+                self._widget = None
+            self._widget_depth = self._div_depth
+            self._text_parts = None
         elif (
-            self._post is not None
+            self._widget is not None
             and "tgme_widget_message_text" in classes
             and self._text_parts is None
         ):
@@ -68,8 +78,8 @@ class _PreviewParser(HTMLParser):
             return
         if self._text_parts is not None and self._div_depth == self._text_depth:
             self._finish_text()
-        if self._post is not None and self._div_depth == self._post_depth:
-            self._post = None
+        if self._widget is not None and self._div_depth == self._widget_depth:
+            self._finish_widget()
         self._div_depth -= 1
 
     def handle_data(self, data: str) -> None:
@@ -77,15 +87,23 @@ class _PreviewParser(HTMLParser):
             self._text_parts.append(data)
 
     def _finish_text(self) -> None:
-        assert self._post is not None and self._text_parts is not None
+        assert self._widget is not None and self._text_parts is not None
         raw = "".join(self._text_parts)
         lines = [re.sub(r"[ \t]+", " ", line).strip() for line in raw.split("\n")]
-        text = "\n".join(line for line in lines if line)
-        channel, msg_id = self._post
-        if text:
-            self.posts.append(Post(channel=channel, msg_id=msg_id, text=text))
+        self._widget["text"] = "\n".join(line for line in lines if line)
         self._text_parts = None
-        self._post = None
+
+    def _finish_widget(self) -> None:
+        assert self._widget is not None
+        w = self._widget
+        if w["text"]:
+            self.posts.append(
+                Post(
+                    channel=w["channel"], msg_id=w["msg_id"],
+                    text=w["text"], published=w["published"],
+                )
+            )
+        self._widget = None
 
 
 def parse_preview(html: str) -> list[Post]:
