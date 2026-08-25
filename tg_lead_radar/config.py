@@ -1,7 +1,9 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# freelansim_ru is intentionally absent: the channel died in February 2026
+# together with Habr Freelance.
 DEFAULT_CHANNELS = (
-    "Remoteit,digitaltender,webfrl,freelead,slavelancers,freelansim_ru,freelancetaverna"
+    "Remoteit,digitaltender,webfrl,freelead,slavelancers,freelancetaverna"
 )
 
 
@@ -16,7 +18,7 @@ class Settings(BaseSettings):
     # Notifications go through a regular bot (@BotFather token) to your user id.
     bot_token: str = ""
     notify_user_id: int = 0
-    web_channels: str = "Remoteit,digitaltender,webfrl,freelansim_ru,freelancetaverna"
+    web_channels: str = "Remoteit,digitaltender,webfrl,freelancetaverna"
     poll_interval_seconds: int = 300
 
     # --- optional local LLM (Ollama) for personalised drafts ---

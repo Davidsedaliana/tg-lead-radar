@@ -141,9 +141,21 @@ class TestMatch:
             "Ищу себе позицию Project Manager, опыт 5 лет",
             "Ищете Fullstack-разработчика? Мы создаем решения для бизнеса",
             "Наша студия разрабатывает ботов под ключ",
+            "Привет, меня зовут Кямиль. Пишу ботов и парсеры на Python",
         ],
     )
     def test_agency_and_jobseeker_selfpromo_rejected(self, text):
+        assert not match(text).matched
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "👔 Менеджер digital-проектов\nВести клиентов, автоматизировать отчёты",
+            "👔 Специалист поддержки\nОтвечать в чатах, работа с CRM",
+            "Ищем сотрудника для редактирования контента через Word",
+        ],
+    )
+    def test_non_dev_roles_in_title_rejected(self, text):
         assert not match(text).matched
 
     def test_categories_ordered_by_dominance(self):
