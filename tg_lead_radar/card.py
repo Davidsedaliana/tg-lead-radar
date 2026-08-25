@@ -7,16 +7,25 @@ EXCERPT_LIMIT = 600
 
 _MSK = timezone(timedelta(hours=3))
 _BUDGET_RE = re.compile(r"вилка|бюджет|оплат|цена|стоимост|гонорар|₽|руб\b|\d{2,}\s?000", re.I)
+_RULE_RE = re.compile(r"[━─—\-=_*·•]{5,}")
 
 CORE_FIT = {"fix", "bot", "ai"}
 
 
 def extract_budget(text: str) -> str | None:
-    """First line that talks money — shown as the card's budget hint."""
+    """First line that talks money — shown as the card's budget hint.
+
+    Order feeds prefix it with a category ("📁 Боты | 💰 5 000 ₽ | ⏰ 10 дн."),
+    so keep only the part from the money marker on: the category and the
+    deadline are already visible in the quoted post.
+    """
     for line in text.split("\n"):
-        if _BUDGET_RE.search(line):
-            line = line.strip()
-            return line[:90]
+        if not _BUDGET_RE.search(line):
+            continue
+        line = line.strip()
+        if "💰" in line:
+            line = line.split("💰", 1)[1].split("|")[0].strip()
+        return line[:90] or None
     return None
 
 
@@ -93,8 +102,17 @@ def message_link(username: str | None, chat_id: int, msg_id: int) -> str:
     return f"https://t.me/c/{internal}/{msg_id}"
 
 
+def strip_channel_footer(text: str) -> str:
+    """Cut everything after a horizontal rule — channels put their own ads
+    and referral offers below one, and that is not part of the order."""
+    for line in text.split("\n"):
+        if _RULE_RE.fullmatch(line.strip()):
+            return text.split(line, 1)[0].rstrip()
+    return text
+
+
 def excerpt(text: str, limit: int = EXCERPT_LIMIT) -> str:
-    text = text.strip()
+    text = strip_channel_footer(text).strip()
     if len(text) <= limit:
         return text
     return text[: limit - 1].rstrip() + "…"

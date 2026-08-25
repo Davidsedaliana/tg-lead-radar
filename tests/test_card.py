@@ -83,6 +83,18 @@ class TestMeta:
         assert c.budget == "Вилка: 8 000 – 15 000 ₽ за проект"
         assert "💰" in render_html(c)
 
+    def test_budget_trimmed_to_money_part_in_order_feeds(self):
+        c = card(text="📁 Скрипты, боты и mini apps | 💰 5 000 ₽ | ⏰ 10 дн.\nСоздать бота")
+        assert c.budget == "5 000 ₽"
+
+    def test_channel_footer_dropped_from_excerpt(self):
+        c = card(
+            text="Нужен бот для заявок\n━━━━━━━━━━━━\n💰 Привёл клиента — тебе 20% → @promo"
+        )
+        rendered = render_plain(c)
+        assert "Нужен бот для заявок" in rendered
+        assert "@promo" not in rendered
+
     def test_no_budget_line_omitted(self):
         c = card(text="Нужен бот, детали в лс")
         assert c.budget is None
