@@ -66,6 +66,11 @@ class TestExpandText:
         )
         assert urls == ["https://forms.gle/a", "https://hh.ru/vacancy/2"]
 
+    def test_link_over_a_line_break_keeps_the_url_on_its_line(self):
+        text = "Анкета\nУсловия"
+        entity = types.MessageEntityTextUrl(offset=0, length=7, url="https://forms.gle/a")
+        assert expand_text(text, [entity])[0] == "Анкета (https://forms.gle/a)\nУсловия"
+
     def test_label_that_is_the_url_is_not_repeated(self):
         text = "Вакансия: hh.ru/vacancy/3"
         entity = types.MessageEntityTextUrl(

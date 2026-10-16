@@ -110,6 +110,9 @@ def expand_text(text: str, entities) -> tuple[str, list[str]]:
     for e in sorted(entities or (), key=lambda e: e.offset):
         end = e.offset + e.length
         label = del_surrogate(s[e.offset:end])
+        # A link often swallows the line break after its label; the URL goes
+        # before it. Whitespace is one UTF-16 unit, so lengths agree here.
+        end -= len(label) - len(label.rstrip())
         if isinstance(e, types.MessageEntityTextUrl):
             urls.append(e.url)
             # A label that already is the URL needs no repeat.
