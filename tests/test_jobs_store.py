@@ -66,7 +66,7 @@ class TestVacancies:
         [rec] = store.records()
         assert rec["salary_from"] == 200_000
         assert rec["city"] == "Москва"  # the first copy's value stays
-        assert rec["matched_stems"] == ["pytest", "qa"]
+        assert rec["matched_stems"] == ["qa", "pytest"]
         assert [s["channel"] for s in rec["sources"]] == ["it_remote", "qa_jobs"]
         # the earliest post is the primary source
         assert rec["channel"] == "it_remote"

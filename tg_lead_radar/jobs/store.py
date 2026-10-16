@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 from .dedup import Fingerprint, shingles
+from .text import unique
 
 MSK = timezone(timedelta(hours=3))
 
@@ -220,7 +221,7 @@ class JobsStore:
         for key in FIELD_KEYS:
             if not record.get(key) and fields.get(key):
                 record[key] = fields[key]
-        record["matched_stems"] = sorted(set(record.get("matched_stems", [])) | set(stems))
+        record["matched_stems"] = unique(record.get("matched_stems", []) + list(stems))
         self._conn.execute(
             "UPDATE vacancies SET record = ?, updated_at = ?, rev = ? WHERE id = ?",
             (json.dumps(record, ensure_ascii=False), now, self._next_rev(), vacancy_id),
