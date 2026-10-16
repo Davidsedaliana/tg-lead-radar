@@ -22,7 +22,7 @@ _TRAILING = ".,;:!?…»)"
 _HASHTAG_LINE = re.compile(r"(?:#[\w_]+[\s,]*)+", re.UNICODE)
 
 
-def _tidy(url: str) -> str:
+def tidy_url(url: str) -> str:
     url = url.rstrip(_TRAILING)
     if not re.match(r"[a-z]+://", url, re.IGNORECASE):
         url = "https://" + url
@@ -34,12 +34,12 @@ def find_urls(text: str) -> list[str]:
     found: list[tuple[int, str]] = []
     taken: list[tuple[int, int]] = []
     for m in _URL_RE.finditer(text):
-        found.append((m.start(), _tidy(m.group(0))))
+        found.append((m.start(), tidy_url(m.group(0))))
         taken.append(m.span())
     for m in _BARE_DOMAIN_RE.finditer(text):
         if any(a <= m.start() < b for a, b in taken) or _inside_email(text, m.start()):
             continue
-        found.append((m.start(), _tidy(m.group(0))))
+        found.append((m.start(), tidy_url(m.group(0))))
     return unique(url for _, url in sorted(found))
 
 
