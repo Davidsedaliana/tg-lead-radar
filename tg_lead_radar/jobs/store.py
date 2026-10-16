@@ -287,6 +287,10 @@ class JobsStore:
         query += " ORDER BY posted_at, id"
         return [self._assemble(row) for row in self._conn.execute(query, params).fetchall()]
 
+    def record(self, vacancy_id: str) -> dict | None:
+        row = self._conn.execute("SELECT * FROM vacancies WHERE id = ?", (vacancy_id,)).fetchone()
+        return self._assemble(row) if row else None
+
     def _assemble(self, row: sqlite3.Row) -> dict:
         sources = [
             dict(s) for s in self._conn.execute(
