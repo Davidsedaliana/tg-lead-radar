@@ -49,11 +49,35 @@ class Settings(BaseSettings):
     session_path: str = "data/radar"
     db_path: str = "data/seen.db"
 
+    # --- modes (userbot): one process, one session, both modes ---
+    orders_enabled: bool = True
+    jobs_enabled: bool = False
+
+    # --- jobs mode: QA vacancies exported as raw data, no LLM ---
+    # Telegram folder with vacancy channels; JOBS_CHANNELS are added to it
+    # (and are the only source when the folder is missing).
+    jobs_folder: str = "Вакансии"
+    jobs_channels: str = ""
+    jobs_backfill_days: int = 14
+    jobs_db_path: str = "data/jobs.db"
+    jobs_export_dir: str = "data/jobs"
+    # Lists, dictionaries and thresholds of the jobs mode and discover.
+    jobs_config_path: str = "jobs.toml"
+    # Cards into Saved Messages for new vacancies; the export is the main output.
+    jobs_notify: bool = False
+
+    # Separate login for scripts/discover_channels.py, so it runs while the
+    # radar holds its own session.
+    discover_session_path: str = "data/discover"
+
     def channel_list(self) -> list[str]:
         return _split(self.channels)
 
     def web_channel_list(self) -> list[str]:
         return _split(self.web_channels)
+
+    def jobs_channel_list(self) -> list[str]:
+        return _split(self.jobs_channels)
 
 
 def _split(raw: str) -> list[str]:

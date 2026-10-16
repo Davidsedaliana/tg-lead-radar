@@ -1,0 +1,295 @@
+# Jobs mode: the lists and thresholds you are expected to tune by hand.
+#
+# How entries match (case-insensitive, at word start):
+#   [filter] lists are stems, as in tg_lead_radar/filters.py, and here EVERY
+#   word of a phrase is a stem: "автоматизац тестир" catches "автоматизация
+#   тестирования". Hashtags work too: "#резюме".
+#   Dictionaries everywhere else match whole words; a trailing "*" makes a
+#   word a stem: "сеньор*" catches "сеньора", while "lead" skips "leading".
+
+[filter]
+# A post is a QA vacancy candidate when any of these stems is found. Links and
+# @mentions are cut out first, so a footer like "@qa_jobs" under every post of
+# a general IT channel does not count.
+stems = [
+    "qa", "aqa", "sdet", "тестировщ", "автотест", "автоматизац тестир",
+    "quality assurance", "test automation", "playwright", "pytest", "selenium",
+]
+
+# Rejected wherever these appear. No bare "резюме", "обучение" or
+# "менторство" here: "присылайте резюме" and "обучение за счёт компании" are
+# in almost every real vacancy — those words only count in the title (below).
+anti = [
+    # ads
+    "erid", "#реклама", "на правах рекламы", "промокод", "розыгрыш",
+    # candidates looking for a job
+    "#резюме", "#ищуработу", "#ищу_работу", "#cv", "#resume", "#whois",
+    "#opentowork", "ищу работу", "ищу позици", "ищу вакансию", "в поиске работы",
+    "рассмотрю предложени", "открыт к предложени", "открыта к предложени",
+    # courses and paid mentoring
+    "набор на курс", "запишись на курс", "записаться на курс", "купить курс",
+    "старт курса", "старт потока", "стоимость обучения", "рассрочк",
+    "бесплатный урок", "бесплатный вебинар", "бесплатный курс",
+    "освоить профессию", "освой профессию", "войти в it", "войти в айти",
+    "стань тестировщик", "станьте тестировщик", "трудоустройство после курс",
+    "гарантией трудоустройств", "ищу ментора", "ищу менти", "менторская программ",
+    "записаться на менторств",
+    # one-off freelance orders
+    "#заказ", "#фриланс", "#freelance", "разовый заказ", "разовая задач",
+    "разовая работ", "разовый проект", "оплата за проект", "бюджет проекта",
+    "бюджет:",
+]
+
+# Rejected only in the title zone (first line + hashtag-only lines after it).
+anti_title = [
+    "курс", "обучени", "ментор", "вебинар", "интенсив", "мастер-класс",
+    "марафон", "резюме",
+]
+
+[extract]
+# Currency for salaries the post gives without one ("от 200к", "до 250 на
+# руки") — but only when the post names no currency at all. Empty = null.
+default_currency = "RUB"
+
+# Lines with these words are salary lines; numbers elsewhere ("опыт от 3 лет")
+# are ignored unless they carry a currency or "к/тыс".
+salary_markers = [
+    "зп", "з/п", "з.п", "зарплат*", "заработн*", "оклад*", "вилк*", "доход*",
+    "оплат*", "компенсаци*", "ставк*", "на руки", "гросс", "нетто", "gross",
+    "net", "salary", "compensation", "rate", "💰", "💵", "💸", "🤑",
+]
+# Perks quote money too ("компенсация фитнеса 15 000 ₽") — never a salary.
+salary_skip = [
+    "фитнес*", "спорт*", "обед*", "питани*", "дмс", "страхов*", "обучени*",
+    "курс*", "конференци*", "отпуск*", "реферал*", "рекомендаци*", "связ*",
+    "интернет*", "оборудовани*", "техник*", "переезд*", "релокаци*", "бонус*",
+    "премия за", "подписк*",
+]
+
+remote = [
+    "удалён*", "удален*", "удалёнк*", "удаленк*", "remote*", "дистанц*",
+    "из дома", "work from home", "wfh",
+]
+hybrid = ["гибрид*", "hybrid"]
+office = ["офис*", "office", "on-site", "onsite", "on site", "в офисе"]
+
+# Lines about time zones name cities without being about location:
+# "с 10 до 19 по Москве", "часовой пояс: Москва".
+city_skip = [
+    "врем*", "часов* пояс*", "utc", "gmt", "timezone", "time zone", "по москве",
+    "мск", "msk",
+]
+
+# The grade is read from the title zone, hashtags and lines that start with
+# one of these words — not from the body, where "будете менторить junior'ов"
+# would give a false grade.
+grade_line_markers = [
+    "грейд*", "уровень", "level", "позици*", "должност*", "ваканси*",
+    "position", "role", "роль",
+]
+
+# Lines with these words carry the channel's own handles, not an employer's.
+contact_skip = [
+    "подпис*", "канал*", "наш чат", "чат:", "больше ваканси*", "реклам*",
+    "разместить ваканси*", "предложить ваканси*", "размещени*", "источник*",
+    "via", "админ*",
+]
+
+# A link is an apply link when its host is one of these (subdomains count;
+# an entry with a path also needs that path prefix)...
+apply_domains = [
+    "hh.ru", "hh.kz", "hh.uz", "rabota.by", "career.habr.com", "getmatch.ru",
+    "superjob.ru", "rabota.ru", "zarplata.ru", "trudvsem.ru", "geekjob.ru",
+    "djinni.co", "linkedin.com/jobs", "huntflow.io", "huntflow.ru", "potok.io",
+    "talantix.ru", "friend.work", "skillaz.ru", "greenhouse.io", "lever.co",
+    "workable.com", "smartrecruiters.com", "ashbyhq.com", "bamboohr.com",
+    "teamtailor.com", "recruitee.com", "personio.de", "wellfound.com",
+    "docs.google.com/forms", "forms.gle", "forms.yandex.ru", "forms.yandex.com",
+    "forms.office.com", "typeform.com", "tally.so", "airtable.com", "jotform.com",
+]
+# ...or a host label / path segment contains one of these.
+apply_path_markers = [
+    "career", "karera", "kariera", "jobs", "job", "vacanc", "vakans", "join",
+    "apply", "hiring", "work-with-us",
+]
+
+[extract.grades]
+junior = ["junior", "jun", "джун*", "джуниор*", "младш*"]
+middle = ["middle", "mid", "мидл*", "миддл*"]
+senior = ["senior", "сеньор*", "синьор*", "старш*"]
+lead = [
+    "lead", "teamlead", "team lead", "techlead", "tech lead", "head of", "лид",
+    "тимлид*", "техлид*", "руководител*",
+]
+
+[extract.cities]
+"Москва" = ["москв*", "moscow"]
+"Санкт-Петербург" = [
+    "санкт-петербург*", "петербург*", "спб", "питер*", "saint petersburg",
+    "st. petersburg",
+]
+"Екатеринбург" = ["екатеринбург*", "екб"]
+"Новосибирск" = ["новосибирск*"]
+"Казань" = ["казан*"]
+"Нижний Новгород" = ["нижн* новгород*"]
+"Самара" = ["самар*"]
+"Краснодар" = ["краснодар*"]
+"Ростов-на-Дону" = ["ростов*"]
+"Пермь" = ["пермь", "перми"]
+"Воронеж" = ["воронеж*"]
+"Уфа" = ["уфа", "уфе", "уфы"]
+"Челябинск" = ["челябинск*"]
+"Омск" = ["омск*"]
+"Томск" = ["томск*"]
+"Калининград" = ["калининград*"]
+"Иннополис" = ["иннополис*"]
+"Минск" = ["минск*", "minsk"]
+"Алматы" = ["алмат*", "almaty"]
+"Астана" = ["астан*", "astana"]
+"Ташкент" = ["ташкент*", "tashkent"]
+"Бишкек" = ["бишкек*", "bishkek"]
+"Тбилиси" = ["тбилиси", "tbilisi"]
+"Ереван" = ["ереван*", "yerevan"]
+"Белград" = ["белград*", "belgrade"]
+"Лимассол" = ["лимассол*", "limassol"]
+"Варшава" = ["варшав*", "warsaw"]
+"Берлин" = ["берлин*", "berlin"]
+"Дубай" = ["дубай", "дубае", "дубаи", "dubai"]
+
+[extract.stack]
+python = ["python", "питон*"]
+java = ["java"]
+kotlin = ["kotlin"]
+javascript = ["javascript", "js"]
+typescript = ["typescript"]
+"c#" = ["c#", "csharp", ".net"]
+golang = ["golang"]
+"c++" = ["c++"]
+swift = ["swift"]
+php = ["php"]
+pytest = ["pytest"]
+unittest = ["unittest"]
+playwright = ["playwright"]
+selenium = ["selenium"]
+selenide = ["selenide"]
+cypress = ["cypress"]
+puppeteer = ["puppeteer"]
+webdriverio = ["webdriverio", "wdio"]
+appium = ["appium"]
+espresso = ["espresso"]
+xcuitest = ["xcuitest"]
+"robot framework" = ["robot framework"]
+cucumber = ["cucumber"]
+behave = ["behave"]
+allure = ["allure"]
+testng = ["testng"]
+junit = ["junit"]
+jest = ["jest"]
+"rest assured" = ["rest assured", "rest-assured", "restassured"]
+postman = ["postman"]
+swagger = ["swagger", "openapi"]
+soapui = ["soapui"]
+jmeter = ["jmeter"]
+k6 = ["k6"]
+gatling = ["gatling"]
+locust = ["locust"]
+docker = ["docker"]
+kubernetes = ["kubernetes", "k8s"]
+jenkins = ["jenkins"]
+"gitlab ci" = ["gitlab ci", "gitlab-ci", "gitlab"]
+"github actions" = ["github actions"]
+teamcity = ["teamcity"]
+"ci/cd" = ["ci/cd", "ci cd"]
+git = ["git"]
+linux = ["linux"]
+sql = ["sql"]
+postgresql = ["postgresql", "postgres", "постгрес*"]
+mysql = ["mysql"]
+mongodb = ["mongodb", "mongo"]
+redis = ["redis"]
+kafka = ["kafka"]
+rabbitmq = ["rabbitmq"]
+grpc = ["grpc"]
+graphql = ["graphql"]
+"rest api" = ["rest api", "rest-api", "restful"]
+soap = ["soap"]
+jira = ["jira"]
+confluence = ["confluence"]
+testrail = ["testrail"]
+"test it" = ["testit", "test it"]
+qase = ["qase"]
+testops = ["testops"]
+charles = ["charles"]
+fiddler = ["fiddler"]
+devtools = ["devtools", "dev tools"]
+android = ["android"]
+ios = ["ios"]
+aws = ["aws"]
+wiremock = ["wiremock"]
+testcontainers = ["testcontainers"]
+
+[dedup]
+# Fuzzy matching only looks this far back (by publication date).
+window_days = 30
+# Jaccard similarity of 3-word shingles above which two posts are the same
+# vacancy; a lower bar applies when the titles match.
+similarity = 0.8
+title_similarity = 0.5
+# Lines skipped when taking the title: they say nothing about the vacancy.
+generic_titles = [
+    "вакансия", "новая вакансия", "горячая вакансия", "открыта вакансия",
+    "ищем", "мы ищем", "hiring", "we are hiring", "job", "vacancy", "new job",
+]
+
+[collector]
+# A post shorter than this that links to exactly one other post is a repost
+# by link: the linked post is fetched and treated as the vacancy text.
+linked_post_max_chars = 400
+# Ceiling for the first-run history load per channel.
+backfill_max_posts = 3000
+# The folder is re-read this often, so channels added to it are picked up
+# without a restart.
+folder_refresh_minutes = 60
+
+[discover]
+queries = [
+    "вакансии QA", "вакансии тестировщик", "QA jobs", "AQA вакансии",
+    "IT вакансии удаленка", "тестировщик работа", "QA вакансии удаленно",
+    "автотесты вакансии", "QA Automation jobs", "SDET jobs",
+]
+# Results per search query (Telegram caps it anyway).
+search_limit = 20
+# At most this many unknown channels are analysed per run.
+max_candidates = 40
+posts_per_channel = 100
+# Pause between requests, seconds.
+pause_seconds = 2.0
+# A longer FloodWait stops the run; the report is written with what is done.
+max_flood_wait = 300
+# Group chats with vacancies exist too; off = channels only.
+include_groups = false
+ad_markers = [
+    "erid", "#реклама", "#ad", "реклам*", "промокод*", "на правах рекламы",
+    "партнерский пост", "партнёрский пост", "розыгрыш*", "по ссылке в шапке",
+]
+
+[discover.thresholds]
+# "живой": all three hold. "мертвяк": no post for dead_min_days or longer.
+# Everything in between is "сомнительный".
+alive_max_days = 3
+alive_min_posts_week = 3
+alive_min_qa_share = 0.10
+dead_min_days = 30
+
+[discover.score]
+# Weights of the 0..1 components; the score is 0..100.
+freshness = 0.25
+activity = 0.20
+qa = 0.35
+engagement = 0.20
+# A component reaches 1.0 at these values.
+activity_target_posts_week = 7
+qa_target_share = 0.30
+engagement_target = 0.10
+# Score is multiplied by (1 - junk_penalty * share of ads and reposts).
+junk_penalty = 0.5
