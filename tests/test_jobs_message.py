@@ -14,6 +14,35 @@ from tg_lead_radar.jobs.message import (
 )
 
 WHEN = datetime(2026, 10, 15, 11, 0, tzinfo=UTC)
+
+# Telethon 1.45 (layer 229) moved inline button payloads into button.type;
+# the radar reads both shapes, and the tests build whichever one is installed.
+NEW_BUTTONS = hasattr(types, "KeyboardInlineButton")
+
+
+def url_button(text, url):
+    if NEW_BUTTONS:
+        return types.KeyboardInlineButton(text=text, type=types.InlineButtonTypeUrl(url))
+    return types.KeyboardButtonUrl(text=text, url=url)
+
+
+def profile_button(text, user_id):
+    if NEW_BUTTONS:
+        return types.KeyboardInlineButton(
+            text=text, type=types.InlineButtonTypeUserProfile(user_id=user_id)
+        )
+    return types.KeyboardButtonUserProfile(text=text, user_id=user_id)
+
+
+def callback_button(text, data):
+    if NEW_BUTTONS:
+        return types.KeyboardInlineButton(text=text, type=types.InlineButtonTypeCallback(data))
+    return types.KeyboardButtonCallback(text=text, data=data)
+
+
+def inline_markup(*buttons):
+    row = types.KeyboardInlineButtonRow if NEW_BUTTONS else types.KeyboardButtonRow
+    return types.ReplyInlineMarkup(rows=[row(buttons=list(buttons))])
 CHAT = SimpleNamespace(id=1234567890, username="qa_jobs", title="QA Jobs")
 
 
@@ -98,19 +127,11 @@ class TestExpandText:
 
 class TestButtons:
     def test_url_and_profile_buttons(self):
-        markup = types.ReplyInlineMarkup(rows=[
-            types.KeyboardInlineButtonRow(buttons=[
-                types.KeyboardInlineButton(
-                    text="Откликнуться", type=types.InlineButtonTypeUrl("https://hh.ru/v/1")
-                ),
-                types.KeyboardInlineButton(
-                    text="HR", type=types.InlineButtonTypeUserProfile(user_id=7)
-                ),
-                types.KeyboardInlineButton(
-                    text="👍", type=types.InlineButtonTypeCallback(data=b"x")
-                ),
-            ])
-        ])
+        markup = inline_markup(
+            url_button("Откликнуться", "https://hh.ru/v/1"),
+            profile_button("HR", 7),
+            callback_button("👍", b"x"),
+        )
         assert button_links(markup) == [
             ("Откликнуться", "https://hh.ru/v/1"),
             ("HR", "tg://user?id=7"),
@@ -171,13 +192,7 @@ class TestForward:
 
 class TestBuildRawPost:
     def test_full_post(self):
-        markup = types.ReplyInlineMarkup(rows=[
-            types.KeyboardInlineButtonRow(buttons=[
-                types.KeyboardInlineButton(
-                    text="Откликнуться", type=types.InlineButtonTypeUrl("https://hh.ru/v/9")
-                )
-            ])
-        ])
+        markup = inline_markup(url_button("Откликнуться", "https://hh.ru/v/9"))
         msg = message(
             "QA Engineer\nПодробнее",
             entities=[types.MessageEntityTextUrl(12, 9, "https://career.x.io/qa")],
