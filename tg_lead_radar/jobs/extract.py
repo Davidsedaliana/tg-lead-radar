@@ -47,8 +47,10 @@ _AMOUNT_RE = re.compile(
     re.IGNORECASE,
 )
 # A number followed by these is a count, not money: "от 3 лет", "200+ человек".
+# "от 3-х лет" and "2-3 года" too: an optional range and a case ending come first.
 _UNIT_RE = re.compile(
-    r"\+?\s*(?:лет|год\w*|years?|мес\w*|months?|дн\w*|days?|недел\w*|weeks?|"
+    r"\+?\s*(?:(?:[-–—]|до|to)\s*\d{1,3}\s*\+?\s*)?(?:-?[а-яё]{1,3}\s+)?"
+    r"(?:лет|год\w*|years?|мес\w*|months?|дн\w*|days?|недел\w*|weeks?|"
     r"час\w*|hours?|чел\w*|сотрудник\w*|специалист\w*|people|шт\w*|раза?(?!\w)|"
     r"%|x(?!\w)|мин\w*|сек\w*|км|km|кв\w*|этаж\w*|проект\w*|заказ\w*|подписчик\w*)",
     re.IGNORECASE,
@@ -262,11 +264,11 @@ def extract_salary(text: str, cfg: ExtractConfig) -> Salary:
         if cfg.salary_skip.any(line):
             carry = False
             continue
-        if carry or cfg.salary_markers.any(line):
-            marked.append(line)
-            carry = not re.search(r"\d", line)
-        else:
-            other.append(line)
+        marker = cfg.salary_markers.any(line)
+        (marked if carry or marker else other).append(line)
+        # Only the very next line: "Компенсация: обсуждаем" must not turn every
+        # digitless line below it into a salary line.
+        carry = marker and not re.search(r"\d", line)
     free = _free_currencies(text)
     for line, salary_line in [(ln, True) for ln in marked] + [(ln, False) for ln in other]:
         for group in _expressions(line):
@@ -376,12 +378,20 @@ def extract_company(text: str) -> str | None:
     return value[:120] or None
 
 
+_TITLE_LABEL_RE = re.compile(
+    r"^(?:вакансия|позиция|должность|роль|vacancy|position|role|job)\s*[:.—–-]\s*", re.IGNORECASE
+)
+
+
 def extract_title(text: str, generic: frozenset[str] = frozenset()) -> str:
-    """The first line that names something: not hashtags, not "🔥 Новая вакансия!"."""
+    """The first line that names something: not hashtags, not "🔥 Новая вакансия!",
+    not "Компания: …". A "Вакансия:" label and trailing links are cut off."""
     for line in text.split("\n"):
-        if not line.strip() or is_hashtag_line(line):
+        if not line.strip() or is_hashtag_line(line) or _COMPANY_RE.match(line):
             continue
-        clean = re.sub(r"^[^\w(«\"]+", "", line).strip()
+        clean = re.sub(r"^[^\w(«\"]+", "", strip_links(line))
+        clean = _TITLE_LABEL_RE.sub("", " ".join(clean.split()))
+        clean = re.sub(r"\s*\(\s*\)", "", clean).strip(" .,;:—–-")
         words = " ".join(re.sub(r"[\W_]+", " ", clean.lower().replace("ё", "е")).split())
         if clean and words not in generic:
             return clean[:200]

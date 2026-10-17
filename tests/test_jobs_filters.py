@@ -153,3 +153,49 @@ class TestTextHelpers:
     def test_headline_zone_skips_leading_hashtags(self):
         text = "#вакансия #qa\nQA Engineer\n#remote\nОписание"
         assert headline_zone(text) == "#вакансия #qa\nQA Engineer\n#remote"
+
+
+class TestFoundByRecon:
+    """Posts from real channels (October 2026) the first version got wrong."""
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Инженер по ручному функциональному тестированию\nЕкатеринбург, гибрид",
+            "Middle Software Development Engineer in Test\nOn-site (Tbilisi, Georgia).",
+            "Junior / Middle Flutter Test Infrastructure Engineer\nУдалённая работа.",
+            "Game Tester\nCompany: Playgama\nExperience level: Junior",
+            "Junior QC Specialist (UX Requirements Team)\nCompany: Ubisoft Ukraine",
+            "Инженер по автоматизированному тестированию на Android",
+        ],
+    )
+    def test_titles_the_first_stems_missed(self, text):
+        assert match_job(text, CFG).matched
+
+    def test_tester_mentioned_once_in_an_analyst_vacancy(self):
+        text = (
+            "Мы ищем начинающего системного аналитика.\nЧто предстоит делать:\n"
+            "Собирать требования.\nМоделировать бизнес-процессы (BPMN).\n"
+            "Взаимодействовать с разработчиками, тестировщиками и другими аналитиками."
+        )
+        assert match_job(text, CFG).rejected_by == "only in body: тестировщ"
+
+    def test_ad_that_mentions_a_qa_engineer_once(self):
+        text = (
+            "Мы готовы сделать вам оффер!\nВ сентябре пользователи Софи получили офферы.\n"
+            "Рассказываем про кейсы:\n1️⃣ Дана, QA-инженер. Оффер за 3 дня.\n"
+            "2️⃣ Анастасия, UI/UX дизайнер."
+        )
+        assert not match_job(text, CFG).matched
+
+    def test_title_after_an_emoji_line_counts(self):
+        text = "😀😃😄😁😆\nСтажер-тестировщик\n✅ Удаленно\nОбязанности:\n- поддержка автотестов"
+        assert match_job(text, CFG).matched
+
+    def test_body_with_several_stems_still_passes(self):
+        text = "Инженер в команду платёжного шлюза\nЗадачи: автотесты на pytest, Playwright"
+        assert match_job(text, CFG).matched
+
+    def test_meetup(self):
+        text = "5 сентября в Москве будет QA-митап\nДоклады про автотесты"
+        assert not match_job(text, CFG).matched

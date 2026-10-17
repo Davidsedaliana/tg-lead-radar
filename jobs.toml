@@ -14,7 +14,16 @@
 stems = [
     "qa", "aqa", "sdet", "тестировщ", "автотест", "автоматизац тестир",
     "quality assurance", "test automation", "playwright", "pytest", "selenium",
+    # added after a recon of real channels: titles these stems missed
+    "автоматизированн тестир", "инженер по тестировани", "специалист по тестировани",
+    "функциональн тестировани", "регрессионн тестировани", "нагрузочн тестировани",
+    "test engineer", "engineer in test", "test infrastructure", "tester", "тестер",
+    "qc", "quality control",
 ]
+# A stem in the title area (first lines and hashtags) is enough. Otherwise the
+# body needs this many different stems: one "взаимодействовать с тестировщиками"
+# in an analyst vacancy, or "Дана, QA-инженер" in an ad, is not a QA vacancy.
+body_min_stems = 2
 
 # Rejected wherever these appear. No bare "резюме", "обучение" or
 # "менторство" here: "присылайте резюме" and "обучение за счёт компании" are
@@ -43,7 +52,7 @@ anti = [
 # Rejected only in the title zone (first line + hashtag-only lines after it).
 anti_title = [
     "курс", "обучени", "ментор", "вебинар", "интенсив", "мастер-класс",
-    "марафон", "резюме",
+    "марафон", "резюме", "митап", "meetup", "конференци", "подкаст",
 ]
 
 [extract]
@@ -56,8 +65,10 @@ default_currency = "RUB"
 salary_markers = [
     "зп", "з/п", "з.п", "зарплат*", "заработн*", "оклад*", "вилк*", "доход*",
     "оплат*", "компенсаци*", "ставк*", "на руки", "гросс", "нетто", "gross",
-    "net", "salary", "compensation", "rate", "💰", "💵", "💸", "🤑",
+    "salary", "compensation", "rate", "💰", "💵", "💸", "🤑",
 ]
+# NB: no "net" — it matches ".NET 6/8" in a stack line. "200-250k net" still
+# counts: the "k" marks it as money anyway.
 # Perks quote money too ("компенсация фитнеса 15 000 ₽") — never a salary.
 salary_skip = [
     "фитнес*", "спорт*", "обед*", "питани*", "дмс", "страхов*", "обучени*",

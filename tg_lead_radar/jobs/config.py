@@ -67,6 +67,8 @@ class FilterConfig:
     stems: Terms
     anti: Terms
     anti_title: Terms
+    # Different stems the body needs when the title area has none.
+    body_min_stems: int
 
 
 @dataclass(frozen=True)
@@ -171,6 +173,7 @@ def _parse(raw: dict) -> JobsConfig:
             stems=Terms.of(f["stems"], stem=True),
             anti=Terms.of(f["anti"], stem=True),
             anti_title=Terms.of(f["anti_title"], stem=True),
+            body_min_stems=f["body_min_stems"],
         ),
         extract=ExtractConfig(
             default_currency=e["default_currency"].strip().upper() or None,

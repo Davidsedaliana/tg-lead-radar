@@ -91,9 +91,17 @@ class TestSalary:
             "Релиз 16.10, версия 2.5",
             "Реферальный бонус 50 000 ₽",
             "Звоните +7 999 123-45-67",
+            # found by recon in real posts
+            "Опыт автоматизации тестов на Python/Pytest от 3-х лет;",
+            "Опыт в QA 2-3 года, ЗП обсуждается",
+            "• Глубоко знаешь C# и .NET 6/7/8",
         ],
     )
     def test_not_a_salary(self, text):
+        assert extract_salary(text, CFG) == Salary()
+
+    def test_a_label_marks_only_the_next_line(self):
+        text = "Компенсация: обсуждаем\nТребования:\nОпыт от 3 лет\nКоманда из 20 человек"
         assert extract_salary(text, CFG) == Salary()
 
     def test_salary_line_wins_over_perk_line(self):
@@ -237,6 +245,18 @@ class TestCompanyAndTitle:
         generic = load_jobs_config().dedup.generic_titles
         text = "#вакансия #qa\n🔥 Новая вакансия!\n🔥 QA Automation Engineer (Middle+)\nТекст"
         assert extract_title(text, generic) == "QA Automation Engineer (Middle+)"
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("Компания: Innovative People\nВакансия: Senior QA Engineer", "Senior QA Engineer"),
+            ("Вакансия. Junior QA Engineer\nТекст", "Junior QA Engineer"),
+            ("QA-специалист (https://www.vseti.app/vakansii/348)\nМосква", "QA-специалист"),
+            ("Роль: Сетевой инженер с опытом в QA", "Сетевой инженер с опытом в QA"),
+        ],
+    )
+    def test_title_drops_labels_and_links(self, text, expected):
+        assert extract_title(text) == expected
 
     def test_title_of_empty_text(self):
         assert extract_title("#qa") == ""
