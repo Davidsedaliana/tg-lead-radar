@@ -82,6 +82,7 @@ class ExtractConfig:
     city_skip: Terms
     grade_line_markers: Terms
     contact_skip: Terms
+    contact_skip_handles: tuple[str, ...]
     apply_domains: tuple[str, ...]
     apply_path_markers: tuple[str, ...]
     grades: Vocabulary
@@ -185,6 +186,7 @@ def _parse(raw: dict) -> JobsConfig:
             city_skip=Terms.of(e["city_skip"]),
             grade_line_markers=Terms.of(e["grade_line_markers"]),
             contact_skip=Terms.of(e["contact_skip"]),
+            contact_skip_handles=tuple(x.lower() for x in e["contact_skip_handles"]),
             apply_domains=tuple(x.lower() for x in e["apply_domains"]),
             apply_path_markers=tuple(x.lower() for x in e["apply_path_markers"]),
             grades=Vocabulary.of(e["grades"]),

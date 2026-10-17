@@ -138,6 +138,8 @@ def _amounts(line: str) -> list[_Amount]:
         head = _CURRENCY_HEAD_RE.match(rest)
         if not head and not mult and re.match(_LETTER, rest):
             continue  # glued to a word: "3года"
+        if re.match(r"\s*/\s*\d", rest):
+            continue  # a schedule or a ratio: "5/2", "24/7"
         currency = _currency_code(head) or _currency_code(
             _CURRENCY_TAIL_RE.search(line[max(0, m.start() - 8):m.start()])
         )
@@ -234,11 +236,15 @@ def _interpret(
         options = [None]
 
     # "до 250 на руки": bare hundreds in a salary line are thousands
+    implicit = False
     if salary_line and period != "hour" and options[0] in (None, "RUB"):
         if lo is not None and lo < 1000 and first.factor == 1:
-            lo *= 1000
+            lo, implicit = lo * 1000, True
         if hi is not None and hi < 1000 and last.factor == 1:
-            hi *= 1000
+            hi, implicit = hi * 1000, True
+    if implicit:
+        # Thousands guessed and the currency unknown: a guess on a guess.
+        options = [c for c in options if c is not None]
 
     gross, net = bool(_GROSS_RE.search(line)), bool(_NET_RE.search(line))
     for currency in options:
@@ -381,6 +387,13 @@ def extract_company(text: str) -> str | None:
 _TITLE_LABEL_RE = re.compile(
     r"^(?:вакансия|позиция|должность|роль|vacancy|position|role|job)\s*[:.—–-]\s*", re.IGNORECASE
 )
+# Lines that describe a field, not the vacancy: "Локация: РФ", "Формат: удалёнка".
+_FIELD_LINE_RE = re.compile(
+    r"^(?:локация|location|город|city|формат|format|зарплата|зп|з/п|salary|вилка|график|"
+    r"schedule|занятость|employment|опыт|experience|грейд|level|уровень|стек|stack|"
+    r"контакт\w*|contacts?|отклик\w*)\s*[:—–-]",
+    re.IGNORECASE,
+)
 
 
 def extract_title(text: str, generic: frozenset[str] = frozenset()) -> str:
@@ -389,7 +402,10 @@ def extract_title(text: str, generic: frozenset[str] = frozenset()) -> str:
     for line in text.split("\n"):
         if not line.strip() or is_hashtag_line(line) or _COMPANY_RE.match(line):
             continue
-        clean = re.sub(r"^[^\w(«\"@]+", "", " ".join(strip_urls(line).split()))
+        clean = re.sub(r"#\w+", " ", strip_urls(line))
+        clean = re.sub(r"^[^\w(«\"@]+", "", " ".join(clean.split()))
+        if _FIELD_LINE_RE.match(clean):
+            continue
         clean = _TITLE_LABEL_RE.sub("", clean)
         clean = re.sub(r"\s*\(\s*\)", "", clean).strip(" .,;:—–-")
         words = " ".join(re.sub(r"[\W_]+", " ", clean.lower().replace("ё", "е")).split())
@@ -456,7 +472,12 @@ def extract_contacts(
             if contact:
                 found.append(contact)
     skip = {name.lower().lstrip("@") for name in exclude if name}
-    kept = [c for c in found if c.lstrip("@").lower() not in skip]
+    kept = [
+        c for c in found
+        if c.lstrip("@").lower() not in skip
+        # "в TG @jobforqa", "@qajobsoffers": channels that carry vacancies, not people
+        and not (c.startswith("@") and any(m in c.lower() for m in cfg.contact_skip_handles))
+    ]
     return unique(kept) or None
 
 

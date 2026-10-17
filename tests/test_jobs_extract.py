@@ -100,6 +100,10 @@ class TestSalary:
     def test_not_a_salary(self, text):
         assert extract_salary(text, CFG) == Salary()
 
+    def test_schedule_is_not_money(self):
+        text = "Зарплата: по итогам собеседования\n- График: 5/2, удалённо"
+        assert extract_salary(text, CFG) == Salary()
+
     def test_a_label_marks_only_the_next_line(self):
         text = "Компенсация: обсуждаем\nТребования:\nОпыт от 3 лет\nКоманда из 20 человек"
         assert extract_salary(text, CFG) == Salary()
@@ -253,10 +257,19 @@ class TestCompanyAndTitle:
             ("Вакансия. Junior QA Engineer\nТекст", "Junior QA Engineer"),
             ("QA-специалист (https://www.vseti.app/vakansii/348)\nМосква", "QA-специалист"),
             ("Роль: Сетевой инженер с опытом в QA", "Сетевой инженер с опытом в QA"),
+            ("Локация: РФ\nФормат: удалёнка\nQA Automation", "QA Automation"),
+            ("- QA в TG @jobforqa (https://x.ru/qa/jobs/1)", "QA в TG @jobforqa"),
         ],
     )
     def test_title_drops_labels_and_links(self, text, expected):
         assert extract_title(text) == expected
+
+    def test_title_skips_greetings_and_a_bare_vacancy_word(self):
+        generic = load_jobs_config().dedup.generic_titles
+        assert extract_title("Привет!👋\nИщем QA Lead", generic) == "Ищем QA Lead"
+        assert extract_title("вакансия #qa #remote\nSenior AQA (Java)", generic) == (
+            "Senior AQA (Java)"
+        )
 
     def test_title_of_empty_text(self):
         assert extract_title("#qa") == ""
@@ -308,6 +321,10 @@ class TestContacts:
 
     def test_email_is_not_a_handle(self):
         assert extract_contacts("jobs@company.io", [], CFG, set()) == ["jobs@company.io"]
+
+    def test_channels_that_carry_vacancies_are_not_contacts(self):
+        text = "QA Engineer в TG @jobforqa\nПишите @hr_anna\n@qajobsoffers @relocatesme"
+        assert extract_contacts(text, [], CFG, set()) == ["@hr_anna"]
 
     def test_buttons(self):
         buttons = [

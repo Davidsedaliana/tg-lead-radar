@@ -108,6 +108,13 @@ contact_skip = [
     "via", "админ*",
 ]
 
+# @handles containing any of these are channels that carry vacancies ("в TG
+# @jobforqa", "@qajobsoffers"), not people to write to.
+contact_skip_handles = [
+    "job", "vacan", "vakans", "rabota", "offer", "career", "relocat", "remote",
+    "channel", "news", "digest", "chat", "group",
+]
+
 # A link is an apply link when its host is one of these (subdomains count;
 # an entry with a path also needs that path prefix)...
 apply_domains = [
@@ -252,6 +259,8 @@ title_similarity = 0.5
 generic_titles = [
     "вакансия", "новая вакансия", "горячая вакансия", "открыта вакансия",
     "ищем", "мы ищем", "hiring", "we are hiring", "job", "vacancy", "new job",
+    "привет", "всем привет", "добрый день", "здравствуйте", "hello", "hi",
+    "прямая вакансия от рекрутера на сайте talanto",
 ]
 
 [collector]
