@@ -198,8 +198,8 @@ class TestDuplicates:
         client = FakeClient({100: [msg(1, VACANCY)]})
         r = radar(client, store, tmp_path)
         post = collector.build_raw_post(client.history[100][0], QA)
-        assert await r.process(post) is not None
-        assert await r.process(post) is None
+        assert await r.process(post)
+        assert await r.process(post) == []
 
 
 class TestOriginals:
@@ -286,3 +286,36 @@ async def test_unreadable_channel_does_not_break_the_cycle(store, tmp_path):
 
     client = Broken({100: [msg(1, VACANCY)]})
     assert await radar(client, store, tmp_path, sources=(IT, QA)).poll() == 1
+
+
+DIGEST = """Подборка Junior/Стажёр удалённо
+
+- Стажёр NLP в SimbirSoft (https://youngjunior.ru/data/jobs/61421)
+- QA Engineer - Automation & Manual в Acme (https://youngjunior.ru/qa/jobs/61468)
+- Junior тестировщик в Beta (https://youngjunior.ru/qa/jobs/61470)"""
+
+
+class TestListPosts:
+    async def test_each_qa_line_is_a_vacancy(self, store, tmp_path):
+        client = FakeClient({100: [msg(1, DIGEST)]})
+        assert await radar(client, store, tmp_path).poll() == 2
+        recs = store.records()
+        assert sorted(r["title"] for r in recs) == [
+            "Junior тестировщик в Beta", "QA Engineer - Automation & Manual в Acme",
+        ]
+        assert all(r["format"] == "remote" for r in recs)  # from the shared header
+        assert {r["list_item"]["of"] for r in recs} == {3}
+        assert [len(r["sources"]) for r in recs] == [1, 1]
+
+    async def test_same_vacancy_link_merges_a_digest_line_and_a_post(self, store, tmp_path):
+        standalone = (
+            "QA Engineer - Automation & Manual\nКомпания: Acme\nУдалённо, автотесты на Python\n"
+            "Откликнуться: https://youngjunior.ru/qa/jobs/61468"
+        )
+        client = FakeClient({
+            100: [msg(1, standalone, days_ago=2)],
+            200: [msg(5, DIGEST, chat=IT, days_ago=1)],
+        })
+        assert await radar(client, store, tmp_path, sources=(QA, IT)).poll() == 2
+        merged = next(r for r in store.records() if r["company"] == "Acme")
+        assert [s["channel"] for s in merged["sources"]] == ["qa_jobs", "it_remote"]

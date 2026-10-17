@@ -11,14 +11,17 @@ from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 from .dedup import Fingerprint, shingles
+from .lists import vacancy_url_key
 from .text import unique
 
 MSK = timezone(timedelta(hours=3))
+MAX_VACANCY_LINKS = 2
 
 # Fields a later copy of a vacancy may fill in when the first one lacked them.
 FIELD_KEYS = (
-    "salary_from", "salary_to", "currency", "salary_period", "format", "city",
-    "grade", "stack", "contacts", "apply_urls", "attachments",
+    "company", "salary_from", "salary_to", "currency", "salary_period", "salary_gross",
+    "format", "city", "grade", "experience_grade", "stack", "contacts", "apply_urls",
+    "same_as", "attachments",
 )
 
 _SCHEMA = """
@@ -46,6 +49,7 @@ CREATE INDEX IF NOT EXISTS vacancies_rev ON vacancies (rev);
 CREATE TABLE IF NOT EXISTS vacancy_sources (
     chat_id INTEGER NOT NULL,
     msg_id INTEGER NOT NULL,
+    item INTEGER NOT NULL DEFAULT 0,
     vacancy_id TEXT NOT NULL,
     kind TEXT NOT NULL,
     channel TEXT,
@@ -54,9 +58,13 @@ CREATE TABLE IF NOT EXISTS vacancy_sources (
     posted_at TEXT,
     views INTEGER,
     seen_at TEXT NOT NULL,
-    PRIMARY KEY (chat_id, msg_id)
+    PRIMARY KEY (chat_id, msg_id, item)
 );
 CREATE INDEX IF NOT EXISTS vacancy_sources_vacancy ON vacancy_sources (vacancy_id);
+CREATE TABLE IF NOT EXISTS vacancy_urls (
+    url_key TEXT PRIMARY KEY,
+    vacancy_id TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
@@ -91,6 +99,7 @@ class Source:
     message_link: str | None
     posted_at: str | None
     views: int | None = None
+    item: int = 0  # position in a list post ("Подборка вакансий"), 0 for a whole post
 
 
 class JobsStore:
@@ -99,12 +108,29 @@ class JobsStore:
         self._conn = sqlite3.connect(db_path, timeout=30)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
+        self._migrate()
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
         self._shingles: dict[str, frozenset[str]] = {}
 
     def close(self) -> None:
         self._conn.close()
+
+    def _migrate(self) -> None:
+        """A database from before list posts has no `item` in vacancy_sources;
+        SQLite cannot change a primary key in place, so the table is rebuilt."""
+        columns = [r[1] for r in self._conn.execute("PRAGMA table_info(vacancy_sources)")]
+        if columns and "item" not in columns:
+            self._conn.execute("ALTER TABLE vacancy_sources RENAME TO vacancy_sources_old")
+            self._conn.executescript(_SCHEMA)
+            self._conn.execute(
+                "INSERT INTO vacancy_sources (chat_id, msg_id, item, vacancy_id, kind, channel, "
+                "channel_title, message_link, posted_at, views, seen_at) "
+                "SELECT chat_id, msg_id, 0, vacancy_id, kind, channel, channel_title, "
+                "message_link, posted_at, views, seen_at FROM vacancy_sources_old"
+            )
+            self._conn.execute("DROP TABLE vacancy_sources_old")
+            self._conn.commit()
 
     # --- channels ---
 
@@ -162,6 +188,30 @@ class JobsStore:
         ).fetchone()
         return row is not None
 
+    @staticmethod
+    def _url_keys(urls: list[str] | None) -> list[str]:
+        """Vacancy links of a record. A post with more than two is a list that
+        slipped past detection — its links name other vacancies too."""
+        keys = unique(filter(None, map(vacancy_url_key, urls or [])))
+        return keys if len(keys) <= MAX_VACANCY_LINKS else []
+
+    def find_by_url(self, urls: list[str] | None) -> str | None:
+        """A vacancy already known under one of these vacancy links."""
+        for key in self._url_keys(urls):
+            row = self._conn.execute(
+                "SELECT vacancy_id FROM vacancy_urls WHERE url_key = ?", (key,)
+            ).fetchone()
+            if row:
+                return row[0]
+        return None
+
+    def _add_urls(self, vacancy_id: str, urls: list[str] | None) -> None:
+        for key in self._url_keys(urls):
+            self._conn.execute(
+                "INSERT OR IGNORE INTO vacancy_urls (url_key, vacancy_id) VALUES (?, ?)",
+                (key, vacancy_id),
+            )
+
     def find_by_hash(self, text_hash: str) -> str | None:
         row = self._conn.execute(
             "SELECT id FROM vacancies WHERE text_hash = ? LIMIT 1", (text_hash,)
@@ -206,6 +256,7 @@ class JobsStore:
              json.dumps(record, ensure_ascii=False), now, now, self._next_rev()),
         )
         self._add_sources(vacancy_id, sources, now)
+        self._add_urls(vacancy_id, record.get("apply_urls"))
         self._conn.commit()
 
     def attach(
@@ -227,6 +278,7 @@ class JobsStore:
             (json.dumps(record, ensure_ascii=False), now, self._next_rev(), vacancy_id),
         )
         self._add_sources(vacancy_id, sources, now)
+        self._add_urls(vacancy_id, fields.get("apply_urls"))
         self._conn.commit()
 
     def _add_sources(self, vacancy_id: str, sources: list[Source], now: str) -> None:
@@ -234,16 +286,17 @@ class JobsStore:
             # An original first known from a forward, then read in its own
             # channel, becomes a "post" source with its views.
             self._conn.execute(
-                "INSERT INTO vacancy_sources (chat_id, msg_id, vacancy_id, kind, channel, "
+                "INSERT INTO vacancy_sources (chat_id, msg_id, item, vacancy_id, kind, channel, "
                 "channel_title, message_link, posted_at, views, seen_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (chat_id, msg_id) DO UPDATE SET "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT (chat_id, msg_id, item) DO UPDATE SET "
                 "kind = CASE WHEN excluded.kind = 'post' THEN 'post' ELSE kind END, "
                 "channel = COALESCE(excluded.channel, channel), "
                 "channel_title = COALESCE(excluded.channel_title, channel_title), "
                 "message_link = COALESCE(excluded.message_link, message_link), "
                 "posted_at = COALESCE(posted_at, excluded.posted_at), "
                 "views = COALESCE(excluded.views, views)",
-                (s.chat_id, s.msg_id, vacancy_id, s.kind, s.channel, s.channel_title,
+                (s.chat_id, s.msg_id, s.item, vacancy_id, s.kind, s.channel, s.channel_title,
                  s.message_link, s.posted_at, s.views, now),
             )
         self._conn.execute(
@@ -296,13 +349,15 @@ class JobsStore:
         sources = [
             dict(s) for s in self._conn.execute(
                 "SELECT chat_id, kind, channel, channel_title, message_link, posted_at, views "
-                "FROM vacancy_sources WHERE vacancy_id = ? ORDER BY posted_at, chat_id, msg_id",
+                "FROM vacancy_sources WHERE vacancy_id = ? "
+                "ORDER BY posted_at, chat_id, msg_id, item",
                 (row["id"],),
             ).fetchall()
         ]
         for s in sources:
             chat_id = s.pop("chat_id")
-            s["channel"] = s["channel"] or str(chat_id)
+            # The shared export format names a private channel "c/<id>".
+            s["channel"] = s["channel"] or f"c/{chat_id}"
         posts = [s for s in sources if s["kind"] == "post"] or sources
         primary = posts[0] if posts else {}
         record = json.loads(row["record"])
@@ -314,10 +369,12 @@ class JobsStore:
             "message_link": primary.get("message_link"),
             "views": primary.get("views"),
             "text": record["text"],
+            "title": record.get("title"),
             **{key: record.get(key) for key in FIELD_KEYS if key != "attachments"},
             "links": record.get("links") or [],
             "attachments": record.get("attachments") or [],
             "original": record.get("original"),
+            "list_item": record.get("list_item"),
             "sources": sources,
             "matched_stems": record.get("matched_stems", []),
             "first_seen_at": row["first_seen_at"],

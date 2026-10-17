@@ -60,6 +60,12 @@ def strip_links(text: str) -> str:
     return _MENTION_RE.sub(" ", text)
 
 
+def strip_urls(text: str) -> str:
+    """Text without URLs; @handles stay, unlike strip_links: in a title
+    "в TG @jobforqa" is how the vacancy says where to apply."""
+    return _BARE_DOMAIN_RE.sub(" ", _URL_RE.sub(" ", text))
+
+
 def is_hashtag_line(line: str) -> bool:
     return bool(_HASHTAG_LINE.fullmatch(line.strip()))
 

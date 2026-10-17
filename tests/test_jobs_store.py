@@ -1,3 +1,5 @@
+import dataclasses
+import sqlite3
 from datetime import UTC, datetime
 
 import pytest
@@ -84,7 +86,7 @@ class TestVacancies:
 
     def test_private_channel_is_named_by_id(self, store):
         add(store, "v1", "QA", [src(123, 1, channel=None)])
-        assert store.records()[0]["channel"] == "123"
+        assert store.records()[0]["channel"] == "c/123"
 
 
 class TestRecords:
@@ -125,3 +127,52 @@ class TestRecords:
         s2 = JobsStore(path)
         assert s2.count() == 1 and s2.has_post(1, 1)
         s2.close()
+
+
+class TestVacancyLinks:
+    def test_same_vacancy_link_finds_the_vacancy(self, store):
+        add(store, "v1", "QA", [src(1, 1)], apply_urls=["https://hh.ru/vacancy/123?from=tg"])
+        assert store.find_by_url(["https://spb.hh.ru/vacancy/123"]) is None  # other host
+        assert store.find_by_url(["https://hh.ru/vacancy/123"]) == "v1"
+        assert store.find_by_url(["https://company.com/careers"]) is None
+
+    def test_a_post_with_many_vacancy_links_is_not_indexed(self, store):
+        links = [f"https://hh.ru/vacancy/{n}" for n in (1, 2, 3)]
+        add(store, "v1", "QA digest", [src(1, 1)], apply_urls=links)
+        assert store.find_by_url(["https://hh.ru/vacancy/2"]) is None
+
+    def test_attach_adds_links_of_the_copy(self, store):
+        add(store, "v1", "QA", [src(1, 1)])
+        store.attach("v1", {"apply_urls": ["https://ingamejob.com/job/senior-qa-3"]}, [],
+                     [src(2, 1)])
+        assert store.find_by_url(["https://ingamejob.com/job/senior-qa-3"]) == "v1"
+
+
+class TestListItems:
+    def test_items_of_one_post_are_separate_sources(self, store):
+        add(store, "a", "QA one", [_item(src(1, 10), 1)])
+        add(store, "b", "QA two", [_item(src(1, 10), 2)])
+        assert store.count() == 2 and store.has_post(1, 10)
+
+
+def _item(source, index):
+    return dataclasses.replace(source, item=index)
+
+
+def test_old_database_is_migrated(tmp_path):
+    path = tmp_path / "jobs.db"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        "CREATE TABLE vacancy_sources (chat_id INTEGER NOT NULL, msg_id INTEGER NOT NULL, "
+        "vacancy_id TEXT NOT NULL, kind TEXT NOT NULL, channel TEXT, channel_title TEXT, "
+        "message_link TEXT, posted_at TEXT, views INTEGER, seen_at TEXT NOT NULL, "
+        "PRIMARY KEY (chat_id, msg_id));"
+        "INSERT INTO vacancy_sources VALUES (1, 5, 'v1', 'post', 'qa', 'QA', 'l', NULL, 1, 'x');"
+    )
+    conn.commit()
+    conn.close()
+    s = JobsStore(str(path))
+    assert s.has_post(1, 5)
+    cols = [r[1] for r in s._conn.execute("PRAGMA table_info(vacancy_sources)")]
+    assert "item" in cols
+    s.close()

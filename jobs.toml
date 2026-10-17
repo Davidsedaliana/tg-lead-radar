@@ -30,7 +30,7 @@ body_min_stems = 2
 # in almost every real vacancy — those words only count in the title (below).
 anti = [
     # ads
-    "erid", "#реклама", "на правах рекламы", "промокод", "розыгрыш",
+    "erid", "#реклама", "на правах рекламы", "промокод", "розыгрыш", "регистрируйся",
     # candidates looking for a job
     "#резюме", "#ищуработу", "#ищу_работу", "#cv", "#resume", "#whois",
     "#opentowork", "ищу работу", "ищу позици", "ищу вакансию", "в поиске работы",
@@ -53,6 +53,8 @@ anti = [
 anti_title = [
     "курс", "обучени", "ментор", "вебинар", "интенсив", "мастер-класс",
     "марафон", "резюме", "митап", "meetup", "конференци", "подкаст",
+    # success stories of job-search services: "Оффер в QA за 3 дня"
+    "оффер",
 ]
 
 [extract]

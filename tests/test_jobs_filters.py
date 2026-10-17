@@ -196,6 +196,16 @@ class TestFoundByRecon:
         text = "Инженер в команду платёжного шлюза\nЗадачи: автотесты на pytest, Playwright"
         assert match_job(text, CFG).matched
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Оффер в QA за 3 дня🤘\nУ Даны 2 года опыта в QA.\nАвтотесты не писала.",
+            "2 QA оффера за 10 минут в день — это реально?\nСмотрим на примере Антона",
+        ],
+    )
+    def test_success_story_ads(self, text):
+        assert not match_job(text, CFG).matched
+
     def test_meetup(self):
         text = "5 сентября в Москве будет QA-митап\nДоклады про автотесты"
         assert not match_job(text, CFG).matched

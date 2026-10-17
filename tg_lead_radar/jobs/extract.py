@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from .config import ExtractConfig
-from .text import find_emails, find_urls, is_hashtag_line, strip_links, unique
+from .text import find_emails, find_urls, is_hashtag_line, strip_links, strip_urls, unique
 
 # --- salary -----------------------------------------------------------------
 
@@ -389,8 +389,8 @@ def extract_title(text: str, generic: frozenset[str] = frozenset()) -> str:
     for line in text.split("\n"):
         if not line.strip() or is_hashtag_line(line) or _COMPANY_RE.match(line):
             continue
-        clean = re.sub(r"^[^\w(«\"]+", "", strip_links(line))
-        clean = _TITLE_LABEL_RE.sub("", " ".join(clean.split()))
+        clean = re.sub(r"^[^\w(«\"@]+", "", " ".join(strip_urls(line).split()))
+        clean = _TITLE_LABEL_RE.sub("", clean)
         clean = re.sub(r"\s*\(\s*\)", "", clean).strip(" .,;:—–-")
         words = " ".join(re.sub(r"[\W_]+", " ", clean.lower().replace("ё", "е")).split())
         if clean and words not in generic:

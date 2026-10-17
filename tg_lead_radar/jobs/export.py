@@ -145,7 +145,7 @@ def _block(text: str) -> str:
 
 def _channel_url(rec: dict) -> str | None:
     channel = rec.get("channel")
-    if channel and not channel.isdigit():
+    if channel and not channel.startswith("c/"):
         return f"https://t.me/{channel}"
     return rec.get("message_link")
 

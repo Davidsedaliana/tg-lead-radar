@@ -23,8 +23,9 @@ from ..config import Settings
 from .config import JobsConfig
 from .dedup import fingerprint, normalize, same_vacancy
 from .export import render_card, write_digests
-from .extract import extract_fields
+from .extract import extract_fields, extract_title
 from .filters import match_job
+from .lists import ListItem, item_context, list_items
 from .message import Origin, RawPost, as_link_origin, build_raw_post
 from .store import JobsStore, Source, to_iso
 from .text import strip_links, unique
@@ -172,17 +173,14 @@ class JobsRadar:
             if not getattr(m, "message", None):
                 continue  # service message, or a file of an album without the caption
             post = build_raw_post(m, entity, albums.get(m.grouped_id, ()))
-            outcome = await self.process(post)
-            if outcome is None:
-                continue
-            vacancy_id, is_new = outcome
-            day = self.store.posted_date(vacancy_id)
-            if day:
-                days.add(day)
-            if is_new:
-                new += 1
-                if self.settings.jobs_notify and not backfill:
-                    await self._notify(vacancy_id)
+            for vacancy_id, is_new in await self.process(post):
+                day = self.store.posted_date(vacancy_id)
+                if day:
+                    days.add(day)
+                if is_new:
+                    new += 1
+                    if self.settings.jobs_notify and not backfill:
+                        await self._notify(vacancy_id)
 
         title = getattr(entity, "title", None) or str(entity.id)
         self.store.set_last_msg_id(
@@ -210,54 +208,100 @@ class JobsRadar:
             messages.append(m)
         return messages, newest
 
-    async def process(self, post: RawPost) -> tuple[str, bool] | None:
-        """Store a post if it is a QA vacancy. Returns (vacancy id, is new)."""
+    async def process(self, post: RawPost) -> list[tuple[str, bool]]:
+        """Store a post if it is a QA vacancy — or, for a list post, each of its
+        QA lines. Returns (vacancy id, is new) for every vacancy stored."""
         if self.store.has_post(post.chat_id, post.msg_id):
-            return None
+            return []
         origin = post.forward
         linked = None if origin else await self._linked_original(post)
         if linked:
             origin = as_link_origin(linked)
-
         scan = post.text if linked is None else f"{post.text}\n\n{linked.text}"
+
+        items = list_items(scan)
+        if items:
+            stored = self._process_list(post, origin, scan, items)
+            if stored:
+                return stored
+            # No QA line in it: still judge the post as a whole below.
+
         verdict = match_job(scan, self.config.filter)
         if not verdict.matched:
             if verdict.rejected_by:
                 logger.debug("Jobs: %s rejected (%s)", post.message_link, verdict.rejected_by)
-            return None
+            return []
+        # A repost by link is just a wrapper: the original is the vacancy.
+        return [self._store(
+            post, origin,
+            text=post.text,
+            scan=scan,
+            body=linked.text if linked else post.text,
+            urls=unique(list(post.urls) + list(linked.urls if linked else ())),
+            buttons=list(post.buttons) + list(linked.buttons if linked else ()),
+            attachments=list(post.attachments) + list(linked.attachments if linked else ()),
+            stems=verdict.stems,
+        )]
 
-        urls = unique(list(post.urls) + list(linked.urls if linked else ()))
-        buttons = list(post.buttons) + list(linked.buttons if linked else ())
+    def _process_list(self, post: RawPost, origin, scan: str, items: list[ListItem]):
+        """"Подборка вакансий": every line with a QA title becomes a vacancy of
+        its own, with the post's shared lines as context."""
+        rejected_by = match_job(scan, self.config.filter).rejected_by or ""
+        if rejected_by.startswith(("anti:", "anti_title:")):
+            return []  # an ad or a list of courses
+        context = item_context(scan, items)
+        stored = []
+        for item in items:
+            if not self.config.filter.stems.any(strip_links(item.line)):
+                continue
+            text = f"{item.line}\n\n{context}" if context else item.line
+            verdict = match_job(text, self.config.filter)
+            if not verdict.matched:
+                continue
+            stored.append(self._store(
+                post, origin, text=text, scan=text, body=text, urls=[item.url], buttons=[],
+                attachments=[], stems=verdict.stems, item=(item.index, len(items)),
+            ))
+        return stored
+
+    def _store(
+        self, post: RawPost, origin: Origin | None, *, text: str, scan: str, body: str,
+        urls: list[str], buttons: list, attachments: list, stems: list[str],
+        item: tuple[int, int] | None = None,
+    ) -> tuple[str, bool]:
         exclude = self._known | {
             h.lower() for h in (post.username, origin.username if origin else None) if h
         }
         fields = extract_fields(scan, urls, buttons, self.config.extract, exclude)
-        # A repost by link is just a wrapper: compare copies by the original.
-        body = linked.text if linked else post.text
         fp = fingerprint(body, fields, self.config.dedup)
-        sources = self._sources(post, origin)
+        sources = self._sources(post, origin, item[0] if item else 0)
 
-        duplicate = self._find_duplicate(fp, post)
+        duplicate = self._find_duplicate(fp, post, fields)
         if duplicate:
-            self.store.attach(duplicate, fields, verdict.stems, sources)
+            self.store.attach(duplicate, fields, stems, sources)
             logger.info("Jobs: %s is a copy of %s", post.message_link, duplicate)
             return duplicate, False
 
         vacancy_id = fp.text_hash[:16]
-        attachments = list(post.attachments) + list(linked.attachments if linked else ())
         record = {
-            "text": post.text,
+            "text": text,
+            "title": extract_title(body, self.config.dedup.generic_titles),
             **fields,
             "links": urls,
             "attachments": [asdict(a) for a in attachments],
             "original": _origin_dict(origin),
-            "matched_stems": verdict.stems,
+            "list_item": {"index": item[0], "of": item[1]} if item else None,
+            "matched_stems": stems,
         }
         self.store.add_vacancy(vacancy_id, fp, normalize(body), record, sources)
         logger.info("Jobs: new vacancy %s from %s", vacancy_id, post.message_link)
         return vacancy_id, True
 
-    def _find_duplicate(self, fp, post: RawPost) -> str | None:
+    def _find_duplicate(self, fp, post: RawPost, fields: dict) -> str | None:
+        """The same vacancy link, the same text, or text close enough."""
+        found = self.store.find_by_url(fields.get("apply_urls"))
+        if found:
+            return found
         found = self.store.find_by_hash(fp.text_hash)
         if found:
             return found
@@ -269,11 +313,11 @@ class JobsRadar:
         return None
 
     @staticmethod
-    def _sources(post: RawPost, origin: Origin | None) -> list[Source]:
+    def _sources(post: RawPost, origin: Origin | None, item: int = 0) -> list[Source]:
         sources = [Source(
             chat_id=post.chat_id, msg_id=post.msg_id, kind="post", channel=post.username,
             channel_title=post.title, message_link=post.message_link,
-            posted_at=to_iso(post.posted_at), views=post.views,
+            posted_at=to_iso(post.posted_at), views=post.views, item=item,
         )]
         if origin and origin.chat_id is not None and origin.msg_id is not None:
             sources.append(Source(
