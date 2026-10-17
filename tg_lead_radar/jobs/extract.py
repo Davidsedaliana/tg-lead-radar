@@ -58,8 +58,12 @@ _RANGE_JOIN_RE = re.compile(r"\s*(?:[-–—−]|\.\.\.?|до|to|по)\s*", re.I
 _CURRENCY_GAP = r"(?!\w)\s*(?:[$€£₽₸]|usd|eur|rub)?\s*$"
 _FROM_RE = re.compile(r"(?<!\w)(?:от|from|starting|min\.?|не менее)" + _CURRENCY_GAP, re.I)
 _TO_RE = re.compile(r"(?<!\w)(?:до|up to|to|max\.?|не более)" + _CURRENCY_GAP, re.I)
+# Periods as in the shared export format (docs/vacancy-format.md).
 _PERIODS = (
     ("hour", r"/\s?ч(?:ас)?(?!\w)|(?:в|за|per|an|a)\s+(?:час|ч\.|hour)|/\s?h(?:ou)?r|hourly"),
+    ("shift", r"(?:в|за)\s+смену|/\s?смен|per\s+shift"),
+    ("day", r"(?:в|за)\s+(?:день|сутки)|/\s?(?:день|сут|day)|per\s+day|daily"),
+    ("week", r"(?:в|за)\s+неделю|/\s?(?:нед|week)|per\s+week|weekly"),
     ("year", r"/\s?(?:год|year|yr)|(?:в|за|per|a)\s+(?:год|year|annum)|annually|yearly"),
     ("month", r"/\s?(?:мес|month|mo(?!\w))|(?:в|за|per|a)\s+(?:мес|month)|monthly|ежемесячн"),
 )
@@ -69,8 +73,17 @@ _PERIOD_RE = re.compile("|".join(f"(?P<{n}>{p})" for n, p in _PERIODS), re.IGNOR
 _SANE = {
     "month": {"RUB": (10_000, 5_000_000), "HARD": (300, 100_000)},
     "hour": {"RUB": (100, 20_000), "HARD": (5, 1_000)},
+    "day": {"RUB": (500, 150_000), "HARD": (10, 5_000)},
+    "shift": {"RUB": (500, 150_000), "HARD": (10, 5_000)},
+    "week": {"RUB": (3_000, 1_500_000), "HARD": (50, 25_000)},
     "year": {"RUB": (120_000, 60_000_000), "HARD": (3_000, 2_000_000)},
 }
+# Gross or take-home, read from the salary line itself. "(?<![\w.])" keeps
+# ".NET" in a stack line from counting as "net".
+_GROSS_RE = re.compile(r"(?<!\w)(?:gross|гросс|брутто|до\s+вычета)(?!\w)", re.IGNORECASE)
+_NET_RE = re.compile(
+    r"(?<![\w.])(?:net|нетто|на\s+руки|чистыми|после\s+вычета)(?!\w)", re.IGNORECASE
+)
 
 
 @dataclass(frozen=True)
@@ -78,7 +91,8 @@ class Salary:
     salary_from: int | None = None
     salary_to: int | None = None
     currency: str | None = None
-    salary_period: str | None = None  # "hour" | "month" | "year", only when stated
+    salary_period: str | None = None  # "hour" | "month" | "year" | …, only when stated
+    salary_gross: bool | None = None  # True before tax, False take-home, None unknown
 
 
 @dataclass(frozen=True)
@@ -224,6 +238,7 @@ def _interpret(
         if hi is not None and hi < 1000 and last.factor == 1:
             hi *= 1000
 
+    gross, net = bool(_GROSS_RE.search(line)), bool(_NET_RE.search(line))
     for currency in options:
         if _sane(lo, hi, currency, period or "month"):
             return Salary(
@@ -231,6 +246,7 @@ def _interpret(
                 salary_to=int(hi) if hi is not None else None,
                 currency=currency,
                 salary_period=period,
+                salary_gross=gross if gross != net else None,
             )
     return None
 
@@ -266,14 +282,28 @@ def extract_salary(text: str, cfg: ExtractConfig) -> Salary:
 # --- format, city, grade, stack -------------------------------------------
 
 
+# "удалёнка не рассматривается", "без удалёнки": remote is mentioned, not offered.
+_REMOTE_DENIED_RE = re.compile(
+    r"(?:без|не)\s+(?:удал[её]н|дистанц|remote)\w*"
+    r"|(?:удал[её]нк\w*|удал[её]нн\w*\s+работ\w*|remote)\s+(?:не|is\s+not|isn't)\s+\w+"
+    r"|no\s+remote",
+    re.IGNORECASE,
+)
+
+
 def extract_format(text: str, cfg: ExtractConfig) -> str | None:
+    """The freest format on offer (remote > hybrid > office), as the shared
+    export format has it. Text cannot tell "офис или удалёнка" from "офис,
+    удалёнка раз в неделю", so office plus remote without "гибрид" is null."""
     scan = strip_links(text)
-    if cfg.hybrid.any(scan):
+    remote = cfg.remote.any(_REMOTE_DENIED_RE.sub(" ", scan))
+    hybrid, office = cfg.hybrid.any(scan), cfg.office.any(scan)
+    if remote:
+        return "remote" if hybrid or not office else None
+    if hybrid:
         return "hybrid"
-    remote, office = cfg.remote.any(scan), cfg.office.any(scan)
-    if remote != office:
-        return "remote" if remote else "office"
-    return None  # nothing said, or "офис или удалёнка" — not ours to decide
+    return "office" if office else None
+
 
 
 def extract_city(text: str, cfg: ExtractConfig) -> str | None:
@@ -293,6 +323,77 @@ def extract_grade(text: str, cfg: ExtractConfig) -> list[str] | None:
     zone += re.findall(r"#\w+", "\n".join(lines[3:]))
     found = cfg.grades.found("\n".join(zone).replace("_", " "))
     return found or None
+
+
+_NO_EXPERIENCE_RE = re.compile(
+    r"без\s+опыта|опыт\s+(?:работы\s+)?не\s+(?:нужен|требуется|обязателен)|no\s+experience",
+    re.IGNORECASE,
+)
+_EXPERIENCE_RE = re.compile(
+    r"(?:опыт\w*|experience)[^\d\n]{0,60}?(?<![\d.,])(\d{1,2}(?:[.,]5)?)\s*\+?\s*"
+    r"(?:[-–—]\s*\d{1,2}\s*)?(?:лет|года?|years?|yrs?)(?!\w)"
+    r"|(?<![\d.,])(\d{1,2})\s*\+?\s*(?:years?|yrs?)\s+(?:of\s+)?(?:\w+\s+){0,3}?experience",
+    re.IGNORECASE,
+)
+
+
+def grade_by_experience(text: str) -> str | None:
+    """The fallback the shared format prescribes: no experience → junior,
+    1 to 3 years → middle, 3 and more → senior. Lead never comes from years."""
+    if _NO_EXPERIENCE_RE.search(text):
+        return "junior"
+    m = _EXPERIENCE_RE.search(text)
+    if not m:
+        return None
+    years = float((m.group(1) or m.group(2)).replace(",", "."))
+    if years < 1:
+        return "junior"
+    return "middle" if years < 3 else "senior"
+
+
+def top_grade(grades: list[str] | None, cfg: ExtractConfig) -> str | None:
+    """The most senior of the grades found; the dictionary lists them junior first."""
+    if not grades:
+        return None
+    order = [name for name, _ in cfg.grades.entries]
+    return max(grades, key=order.index)
+
+
+_COMPANY_RE = re.compile(
+    r"^[^\w\n]*(?:компания|company|работодатель|employer)\s*[:—–-]\s*(.+?)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def extract_company(text: str) -> str | None:
+    """Only from an explicit "Компания: …" line — a guess from the body would
+    as often name a client or a product."""
+    m = _COMPANY_RE.search(text)
+    if not m:
+        return None
+    value = re.sub(r"\(\s*\)", "", strip_links(m.group(1)))
+    value = " ".join(value.split()).strip(" .,;:—–-")
+    return value[:120] or None
+
+
+def extract_title(text: str, generic: frozenset[str] = frozenset()) -> str:
+    """The first line that names something: not hashtags, not "🔥 Новая вакансия!"."""
+    for line in text.split("\n"):
+        if not line.strip() or is_hashtag_line(line):
+            continue
+        clean = re.sub(r"^[^\w(«\"]+", "", line).strip()
+        words = " ".join(re.sub(r"[\W_]+", " ", clean.lower().replace("ё", "е")).split())
+        if clean and words not in generic:
+            return clean[:200]
+    return ""
+
+
+_HH_VACANCY_RE = re.compile(r"^https?://(?:[\w-]+\.)*hh\.ru/vacancy/(\d+)", re.IGNORECASE)
+
+
+def extract_same_as(urls: list[str]) -> list[str]:
+    """hh vacancies the post links to, as ids of the hh export: "hh:<digits>"."""
+    return unique(f"hh:{m.group(1)}" for url in urls if (m := _HH_VACANCY_RE.match(url)))
 
 
 def extract_stack(text: str, cfg: ExtractConfig) -> list[str] | None:
@@ -383,14 +484,18 @@ def extract_fields(
 ) -> dict:
     salary = extract_salary(text, cfg)
     return {
+        "company": extract_company(text),
         "salary_from": salary.salary_from,
         "salary_to": salary.salary_to,
         "currency": salary.currency,
         "salary_period": salary.salary_period,
+        "salary_gross": salary.salary_gross,
         "format": extract_format(text, cfg),
         "city": extract_city(text, cfg),
         "grade": extract_grade(text, cfg),
+        "experience_grade": grade_by_experience(text),
         "stack": extract_stack(text, cfg),
         "contacts": extract_contacts(text, buttons, cfg, exclude),
         "apply_urls": extract_apply_urls(urls, cfg),
+        "same_as": extract_same_as(urls) or None,
     }

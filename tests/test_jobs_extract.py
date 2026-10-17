@@ -7,12 +7,17 @@ from tg_lead_radar.jobs.extract import (
     Salary,
     extract_apply_urls,
     extract_city,
+    extract_company,
     extract_contacts,
     extract_fields,
     extract_format,
     extract_grade,
     extract_salary,
+    extract_same_as,
     extract_stack,
+    extract_title,
+    grade_by_experience,
+    top_grade,
 )
 
 CFG = load_jobs_config().extract
@@ -108,10 +113,46 @@ class TestFormat:
             ("Hybrid (Berlin)", "hybrid"),
             ("Офис или удалёнка — на выбор", None),
             ("Python, pytest, Allure", None),
+            # the freest format on offer wins
+            ("Удалёнка или гибрид", "remote"),
+            ("Формат: офис, гибрид или удалёнка", "remote"),
+            ("Офис / гибрид", "hybrid"),
+            # remote mentioned, not offered
+            ("Гибрид, удалёнка не рассматривается", "hybrid"),
+            ("Офис, без удалёнки", "office"),
         ],
     )
     def test_format(self, text, expected):
         assert extract_format(text, CFG) == expected
+
+
+class TestSalaryGrossAndPeriod:
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("ЗП: 250 000 ₽ на руки", False),
+            ("ЗП: 200-250k net", False),
+            ("Вилка 300-350 тыс gross", True),
+            ("Оклад 200 000 ₽ до вычета НДФЛ", True),
+            ("ЗП 200к", None),
+        ],
+    )
+    def test_gross(self, text, expected):
+        assert extract_salary(text, CFG).salary_gross is expected
+
+    def test_dotnet_is_not_net(self):
+        assert extract_salary("Стек .NET, ЗП 300к", CFG).salary_gross is None
+
+    @pytest.mark.parametrize(
+        ("text", "period"),
+        [
+            ("Ставка 8000 ₽ за смену", "shift"),
+            ("Оплата 5000 ₽ в день", "day"),
+            ("$1200 per week", "week"),
+        ],
+    )
+    def test_more_periods(self, text, period):
+        assert extract_salary(text, CFG).salary_period == period
 
 
 class TestCity:
@@ -155,6 +196,61 @@ class TestGrade:
 
     def test_leading_is_not_lead(self):
         assert extract_grade("QA в leading fintech company", CFG) is None
+
+
+class TestGradeForTheExport:
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("Опыт работы от 3 лет", "senior"),
+            ("Опыт коммерческой автоматизации тестирования не менее 2 лет", "middle"),
+            ("Требуемый опыт: 1–3 года", "middle"),
+            ("3+ years of experience in QA", "senior"),
+            ("Experience: 5+ years", "senior"),
+            ("Можно без опыта, научим", "junior"),
+            ("Компания на рынке 10 лет", None),
+        ],
+    )
+    def test_by_experience(self, text, expected):
+        assert grade_by_experience(text) == expected
+
+    def test_top_grade_is_the_most_senior(self):
+        assert top_grade(["middle", "senior"], CFG) == "senior"
+        assert top_grade(["lead", "junior"], CFG) == "lead"
+        assert top_grade(None, CFG) is None
+
+
+class TestCompanyAndTitle:
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("QA Engineer\nКомпания: FinTech Lab", "FinTech Lab"),
+            ("🏢 Компания — Ромашка (https://romashka.ru).", "Ромашка"),
+            ("Company: Acme Inc.", "Acme Inc"),
+            ("Мы — продуктовая компания в финтехе", None),
+        ],
+    )
+    def test_company_only_from_a_labelled_line(self, text, expected):
+        assert extract_company(text) == expected
+
+    def test_title_skips_hashtags_generic_lines_and_decoration(self):
+        generic = load_jobs_config().dedup.generic_titles
+        text = "#вакансия #qa\n🔥 Новая вакансия!\n🔥 QA Automation Engineer (Middle+)\nТекст"
+        assert extract_title(text, generic) == "QA Automation Engineer (Middle+)"
+
+    def test_title_of_empty_text(self):
+        assert extract_title("#qa") == ""
+
+
+class TestSameAs:
+    def test_hh_links_become_hh_ids(self):
+        urls = [
+            "https://spb.hh.ru/vacancy/123456?from=share",
+            "https://hh.ru/vacancy/123456",
+            "https://hh.ru/employer/42",
+            "https://career.habr.com/vacancies/1",
+        ]
+        assert extract_same_as(urls) == ["hh:123456"]
 
 
 class TestStack:
@@ -232,16 +328,20 @@ def test_extract_fields_shape():
         set(),
     )
     assert fields == {
+        "company": None,
         "salary_from": 300_000,
         "salary_to": None,
         "currency": "RUB",
         "salary_period": None,
+        "salary_gross": None,
         "format": "remote",
         "city": None,
         "grade": ["senior"],
+        "experience_grade": None,
         "stack": ["python", "pytest"],
         "contacts": ["@hr_anna"],
         "apply_urls": ["https://hh.ru/vacancy/1"],
+        "same_as": ["hh:1"],
     }
 
 
