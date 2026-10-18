@@ -1,8 +1,10 @@
-"""Export: vacancies.jsonl for the external agent, YYYY-MM-DD.md digests for
-a human, and the optional Saved Messages card.
+"""Export: tg_vacancies.jsonl for the external agent, tg_YYYY-MM-DD.md digests
+for a human, and the optional Saved Messages card.
 
-Files are replaced atomically, so an agent reading the folder never sees
-half a file.
+The jsonl follows the format shared with hh-vacancy-scraper
+(docs/vacancy-format.md): both write to one JOBS_EXPORT_DIR, so an agent reads
+hh_vacancies.jsonl and tg_vacancies.jsonl the same way. Files are replaced
+atomically, so a reader never sees half a file.
 """
 
 import json
@@ -17,13 +19,28 @@ from ..card import excerpt, format_published
 from .store import JobsStore
 from .text import is_hashtag_line
 
-JSONL_NAME = "vacancies.jsonl"
-# Revision of the last `export --since`: everything after it is "new".
+SOURCE = "tg"
+JSONL_NAME = f"{SOURCE}_vacancies.jsonl"
+# Revision of the last `export --since-last`: everything after it is "new".
 MARK_KEY = "export_rev"
 
+# Field order of docs/vacancy-format.md; tests check it against the document.
+CONTRACT_FIELDS = (
+    "id", "source", "url", "title", "company", "text", "salary_from", "salary_to",
+    "currency", "salary_period", "salary_gross", "format", "city", "grade", "stack",
+    "contacts", "apply_urls", "same_as", "posted_at", "first_seen_at", "archived",
+    "search_name", "raw",
+)
+GRADE_ORDER = ("junior", "middle", "senior", "lead")
+
 FORMAT_LABELS = {"remote": "удалёнка", "hybrid": "гибрид", "office": "офис"}
-PERIOD_LABELS = {"hour": "в час", "month": "в месяц", "year": "в год"}
-ORIGIN_LABELS = {"forward": "переслано из", "link": "репост ссылкой на"}
+PERIOD_LABELS = {
+    "hour": "в час", "day": "в день", "shift": "за смену", "week": "в неделю",
+    "month": "в месяц", "year": "в год", "project": "за проект",
+}
+ORIGIN_LABELS = {
+    "forward": "переслано из", "link": "репост ссылкой на", "telegraph": "полный текст:",
+}
 
 
 def atomic_write(path: Path, text: str) -> None:
@@ -68,9 +85,15 @@ def format_salary(rec: dict) -> str | None:
         text = f"до {_num(hi)}"
     if rec.get("currency"):
         text += f" {rec['currency']}"
+    if rec.get("salary_gross") is not None:
+        text += " gross" if rec["salary_gross"] else " на руки"
     if rec.get("salary_period"):
         text += f" {PERIOD_LABELS.get(rec['salary_period'], rec['salary_period'])}"
     return text
+
+
+def _title(rec: dict) -> str:
+    return rec.get("title") or vacancy_title(rec["text"])
 
 
 def _fence(text: str) -> str:
@@ -84,7 +107,7 @@ def _link(title: str | None, url: str | None) -> str:
 
 
 def _field_lines(rec: dict) -> list[str]:
-    lines = []
+    lines = [f"- **Компания:** {rec['company']}"] if rec.get("company") else []
     salary = format_salary(rec)
     if salary:
         lines.append(f"- **Зарплата:** {salary}")
@@ -97,7 +120,10 @@ def _field_lines(rec: dict) -> list[str]:
         meta.append(f"**Грейд:** {', '.join(rec['grade'])}")
     if meta:
         lines.append("- " + " · ".join(meta))
-    for label, key in (("Стек", "stack"), ("Контакты", "contacts"), ("Откликнуться", "apply_urls")):
+    for label, key in (
+        ("Стек", "stack"), ("Контакты", "contacts"), ("Откликнуться", "apply_urls"),
+        ("Та же вакансия на hh", "same_as"),
+    ):
         if rec.get(key):
             lines.append(f"- **{label}:** {', '.join(rec[key])}")
     if rec.get("attachments"):
@@ -108,7 +134,7 @@ def _field_lines(rec: dict) -> list[str]:
 
 def render_vacancy(index: int, rec: dict) -> str:
     head = [
-        f"## {index}. {vacancy_title(rec['text'])}",
+        f"## {index}. {_title(rec)}",
         "",
     ]
     where = [_link(rec.get("channel_title"), _channel_url(rec))]
@@ -165,7 +191,7 @@ def render_digest(day: str, records: list[dict]) -> str:
 
 def render_card(rec: dict) -> str:
     """Saved Messages card for a fresh vacancy (JOBS_NOTIFY=true)."""
-    lines = [f"💼 {vacancy_title(rec['text'])}"]
+    lines = [f"💼 {_title(rec)}"]
     where = [rec.get("channel_title") or rec.get("channel") or ""]
     if rec.get("posted_at"):
         where.append(format_published(rec["posted_at"]))
@@ -196,22 +222,69 @@ def write_digests(store: JobsStore, out_dir: str | Path, days: set[str]) -> list
     out = Path(out_dir)
     written = []
     for day in sorted(days):
-        path = out / f"{day}.md"
+        path = out / f"{SOURCE}_{day}.md"
         atomic_write(path, render_digest(day, store.records(dates={day})))
         written.append(path)
     return written
 
 
+def contract_record(rec: dict) -> dict:
+    """A stored vacancy in the shared format (docs/vacancy-format.md):
+    Telegram specifics go to `raw`, empty lists stay [], one grade — the most
+    senior of the title's, else the one the required experience gives."""
+    grades = rec.get("grade") or []
+    grade = max(grades, key=GRADE_ORDER.index) if grades else rec.get("experience_grade")
+    return {
+        "id": f"{SOURCE}:{rec['id']}",
+        "source": SOURCE,
+        "url": rec.get("message_link"),
+        "title": _title(rec),
+        "company": rec.get("company"),
+        "text": rec["text"],
+        "salary_from": rec.get("salary_from"),
+        "salary_to": rec.get("salary_to"),
+        "currency": rec.get("currency"),
+        "salary_period": rec.get("salary_period"),
+        "salary_gross": rec.get("salary_gross"),
+        "format": rec.get("format"),
+        "city": rec.get("city"),
+        "grade": grade,
+        "stack": rec.get("stack") or [],
+        "contacts": rec.get("contacts") or [],
+        "apply_urls": rec.get("apply_urls") or [],
+        "same_as": rec.get("same_as") or [],
+        "posted_at": rec.get("posted_at"),
+        "first_seen_at": rec["first_seen_at"],
+        "archived": False,
+        "search_name": rec.get("channel") or "",
+        "raw": {
+            "channel": rec.get("channel"),
+            "channel_title": rec.get("channel_title"),
+            "views": rec.get("views"),
+            "sources": rec.get("sources") or [],
+            "links": rec.get("links") or [],
+            "attachments": rec.get("attachments") or [],
+            "original": rec.get("original"),
+            "list_item": rec.get("list_item"),
+            "matched_stems": rec.get("matched_stems") or [],
+            "grades": grades,
+            "updated_at": rec.get("updated_at"),
+        },
+    }
+
+
 def export(store: JobsStore, out_dir: str | Path, since: bool = False) -> ExportResult:
-    """Full export, or with since=True only what is new or updated since the
-    previous `since` export. Only `since` moves the mark, so a full export
-    run by hand does not swallow what the agent has not read yet."""
+    """Full export, or with since=True (--since-last) only what is new or
+    updated since the previous such export. Only that moves the mark, so a
+    full export run by hand does not swallow what the agent has not read yet."""
     out = Path(out_dir)
     upto = store.rev()
     after = int(store.get_meta(MARK_KEY) or 0) if since else None
     records = store.records(after_rev=after, upto_rev=upto)
     jsonl = out / JSONL_NAME
-    atomic_write(jsonl, "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in records))
+    atomic_write(jsonl, "".join(
+        json.dumps(contract_record(r), ensure_ascii=False) + "\n" for r in records
+    ))
     days = {r["posted_at"][:10] for r in records if r.get("posted_at")}
     digests = write_digests(store, out, days)
     if since:

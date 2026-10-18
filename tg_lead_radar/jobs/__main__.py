@@ -1,8 +1,10 @@
 """Jobs mode CLI. Reads data/jobs.db only — no Telegram, so it runs while
 the radar is up:
 
-    python -m tg_lead_radar.jobs export            # everything
-    python -m tg_lead_radar.jobs export --since    # new since the last --since
+    python -m tg_lead_radar.jobs export               # everything
+    python -m tg_lead_radar.jobs export --since-last  # new since the last such run
+
+--since-last is the flag hh-vacancy-scraper uses too; --since still works.
 """
 
 import argparse
@@ -17,9 +19,11 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     cmd = commands.add_parser("export", help="выгрузить вакансии в jsonl и дневные дайджесты")
     cmd.add_argument(
+        "--since-last",
         "--since",
+        dest="since",
         action="store_true",
-        help="только новое и обновлённое с прошлого запуска export --since",
+        help="только новое и обновлённое с прошлого запуска с этим флагом",
     )
     cmd.add_argument("--out", help="папка выгрузки (по умолчанию JOBS_EXPORT_DIR из .env)")
     args = parser.parse_args(argv)

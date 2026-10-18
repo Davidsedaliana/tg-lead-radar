@@ -32,7 +32,7 @@ from .text import find_urls, strip_links
 logger = logging.getLogger(__name__)
 
 ALIVE, DOUBTFUL, DEAD = "живой", "сомнительный", "мертвяк"
-REPORT_NAME = "channels_report"
+REPORT_NAME = "tg_channels_report"  # a name the shared format reserves for tg
 
 
 class StopDiscovery(Exception):

@@ -54,13 +54,17 @@ class TestExport:
         add(store, "v1", day=14, msg_id=1, salary_from=300_000, currency="RUB")
         add(store, "v2", text="QA Engineer", day=15, msg_id=2)
         result = export(store, tmp_path / "out")
+        assert result.jsonl.name == "tg_vacancies.jsonl"
         rows = read_jsonl(result.jsonl)
-        assert [r["id"] for r in rows] == ["v1", "v2"]
+        assert [r["id"] for r in rows] == ["tg:v1", "tg:v2"]
         assert rows[0]["text"] == TEXT  # full text, line breaks kept
         assert rows[0]["salary_from"] == 300_000
         assert rows[0]["posted_at"] == "2026-10-14T14:03:00+03:00"
-        assert rows[0]["sources"][0]["message_link"] == "https://t.me/qa_jobs/1"
-        assert sorted(p.name for p in result.digests) == ["2026-10-14.md", "2026-10-15.md"]
+        assert rows[0]["url"] == "https://t.me/qa_jobs/1"
+        assert rows[0]["raw"]["sources"][0]["message_link"] == "https://t.me/qa_jobs/1"
+        assert sorted(p.name for p in result.digests) == [
+            "tg_2026-10-14.md", "tg_2026-10-15.md",
+        ]
 
     def test_jsonl_is_utf8_not_escaped(self, store, tmp_path):
         add(store, "v1")
@@ -71,13 +75,13 @@ class TestExport:
         add(store, "v1", msg_id=1)
         assert export(store, tmp_path, since=True).vacancies == 1
         assert export(store, tmp_path, since=True).vacancies == 0
-        assert read_jsonl(tmp_path / "vacancies.jsonl") == []
+        assert read_jsonl(tmp_path / "tg_vacancies.jsonl") == []
 
         add(store, "v2", text="QA Engineer", msg_id=2)
         store.attach("v1", {}, [], [src(2, 9, channel="it_remote")])
         rows = read_jsonl(export(store, tmp_path, since=True).jsonl)
-        assert [r["id"] for r in rows] == ["v1", "v2"]
-        assert len(rows[0]["sources"]) == 2
+        assert [r["id"] for r in rows] == ["tg:v1", "tg:v2"]
+        assert len(rows[0]["raw"]["sources"]) == 2
 
     def test_full_export_does_not_move_the_since_mark(self, store, tmp_path):
         add(store, "v1")
@@ -89,7 +93,7 @@ class TestExport:
         export(store, tmp_path, since=True)
         add(store, "v2", text="QA Engineer", msg_id=2)
         export(store, tmp_path, since=True)
-        digest = (tmp_path / "2026-10-15.md").read_text(encoding="utf-8")
+        digest = (tmp_path / "tg_2026-10-15.md").read_text(encoding="utf-8")
         assert "Вакансий: 2" in digest
 
 
@@ -159,6 +163,8 @@ def test_cli_export(tmp_path, monkeypatch, capsys):
     s.close()
     settings = Settings(jobs_db_path=str(db), jobs_export_dir=str(tmp_path / "out"), _env_file=None)
     monkeypatch.setattr(cli, "load_settings", lambda: settings)
-    assert cli.main(["export", "--since"]) == 0
+    assert cli.main(["export", "--since-last"]) == 0
     assert "Вакансий новых и обновлённых: 1" in capsys.readouterr().out
-    assert (tmp_path / "out" / "vacancies.jsonl").exists()
+    assert (tmp_path / "out" / "tg_vacancies.jsonl").exists()
+    assert cli.main(["export", "--since"]) == 0  # the old name still works
+    assert "новых и обновлённых: 0" in capsys.readouterr().out
