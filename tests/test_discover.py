@@ -19,6 +19,7 @@ from tg_lead_radar.jobs.discover import (
     DiscoveryResult,
     compute_stats,
     discover,
+    is_vacancy_post,
     label,
     report_rows,
     score,
@@ -51,7 +52,7 @@ def stats(**overrides) -> ChannelStats:
     base = dict(
         channel_id=1, username="qa_new", title="QA New", subscribers=1000, posts_sampled=100,
         days_since_last=1.0, posts_7d=10, avg_views=150.0, views_per_sub=0.15,
-        qa_share=0.4, ad_share=0.0, repost_share=0.0, junk_share=0.0,
+        vacancy_share=0.4, ad_share=0.0, repost_share=0.0, junk_share=0.0,
     )
     base.update(overrides)
     return ChannelStats(**base)
@@ -71,7 +72,7 @@ class TestComputeStats:
         assert s.posts_7d == 2
         assert s.avg_views == 200
         assert s.views_per_sub == pytest.approx(0.2)
-        assert s.qa_share == 0.5  # the course is not a vacancy
+        assert s.vacancy_share == 0.5  # the course is not a vacancy
         assert s.ad_share == 0.25
         assert s.repost_share == 0.25
         assert s.junk_share == 0.5
@@ -79,7 +80,7 @@ class TestComputeStats:
 
     def test_empty_channel(self):
         s = compute_stats(chan(1, "empty"), [], None, NOW, CONFIG)
-        assert s.days_since_last is None and s.qa_share == 0.0 and s.views_per_sub is None
+        assert s.days_since_last is None and s.vacancy_share == 0.0 and s.views_per_sub is None
 
     def test_service_messages_are_not_posts(self):
         service = types.MessageService(
@@ -87,6 +88,34 @@ class TestComputeStats:
         )
         s = compute_stats(chan(1, "x"), [service, post(1, VACANCY, 1)], 100, NOW, CONFIG)
         assert s.posts_sampled == 1
+
+
+class TestIsVacancyPost:
+    """Found on a live run: channels about testing outranked vacancy channels."""
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "#middle #200k #удаленка\nTEAMSCORE\nQA Automation Engineer",  # qa_rab
+            "Senior QA Engineer\nТребования: опыт с pytest от 3 лет",
+            "Middle QA Engineer\nApply: https://hh.ru/vacancy/123",
+            "Подборка вакансий\n- QA Lead (https://telegra.ph/QA-Lead-10-06)\n"
+            "- Product Designer (https://telegra.ph/Designer-10-06)",
+        ],
+    )
+    def test_vacancies(self, text):
+        assert is_vacancy_post(text, CONFIG)
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Как стать тестировщиком с нуля: 5 шагов\nРазбираем pytest и Playwright",
+            "Вопрос с собеседования QA: чем smoke отличается от sanity?",
+            "Python-разработчик в офис, 300к",  # a vacancy, but not QA
+        ],
+    )
+    def test_not_vacancies(self, text):
+        assert not is_vacancy_post(text, CONFIG)
 
 
 class TestLabel:
@@ -98,7 +127,7 @@ class TestLabel:
         [
             {"days_since_last": 5.0},  # last post too old for "alive"
             {"posts_7d": 2},  # fewer than 3 a week
-            {"qa_share": 0.05},  # mostly not QA
+            {"vacancy_share": 0.05},  # mostly not QA
         ],
     )
     def test_doubtful(self, overrides):
@@ -115,7 +144,7 @@ class TestLabel:
 
 class TestScore:
     def test_ideal_channel_scores_100(self):
-        s = stats(posts_7d=7, qa_share=0.3, views_per_sub=0.1)
+        s = stats(posts_7d=7, vacancy_share=0.3, views_per_sub=0.1)
         assert score(s, CFG) == 100.0
 
     def test_dead_channel_scores_zero(self):
@@ -251,7 +280,7 @@ class TestDiscover:
 class TestReport:
     def test_sorted_by_score_with_links(self, tmp_path):
         result_stats = [
-            stats(username="weak", title="Weak", qa_share=0.0, days_since_last=20.0),
+            stats(username="weak", title="Weak", vacancy_share=0.0, days_since_last=20.0),
             stats(username="strong", title="Strong | QA"),
         ]
         rows = report_rows(result_stats, CFG)

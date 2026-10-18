@@ -110,7 +110,7 @@ class CollectorConfig:
 class Thresholds:
     alive_max_days: float
     alive_min_posts_week: int
-    alive_min_qa_share: float
+    alive_min_vacancy_share: float
     dead_min_days: float
 
 
@@ -118,10 +118,10 @@ class Thresholds:
 class ScoreWeights:
     freshness: float
     activity: float
-    qa: float
+    vacancies: float
     engagement: float
     activity_target_posts_week: float
-    qa_target_share: float
+    vacancy_target_share: float
     engagement_target: float
     junk_penalty: float
 
@@ -136,6 +136,7 @@ class DiscoverConfig:
     max_flood_wait: int
     include_groups: bool
     ad_markers: Terms
+    vacancy_markers: Terms
     thresholds: Thresholds
     score: ScoreWeights
 
@@ -211,6 +212,7 @@ def _parse(raw: dict) -> JobsConfig:
             max_flood_wait=s["max_flood_wait"],
             include_groups=s["include_groups"],
             ad_markers=Terms.of(s["ad_markers"]),
+            vacancy_markers=Terms.of(s["vacancy_markers"]),
             thresholds=Thresholds(**s["thresholds"]),
             score=ScoreWeights(**s["score"]),
         ),

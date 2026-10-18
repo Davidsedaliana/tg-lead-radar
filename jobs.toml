@@ -303,24 +303,32 @@ ad_markers = [
     "erid", "#реклама", "#ad", "реклам*", "промокод*", "на правах рекламы",
     "партнерский пост", "партнёрский пост", "розыгрыш*", "по ссылке в шапке",
 ]
+# A QA post counts as a vacancy when it also has a salary, an apply link, or
+# one of these words. Channels about testing ("Тестировщик с нуля", interview
+# questions, memes) pass the QA filter too, but have none of it.
+vacancy_markers = [
+    "требовани*", "обязанност*", "мы предлагаем", "условия работы", "зп", "з/п",
+    "зарплат*", "вилк*", "оклад*", "откликнуться", "ищем", "requirements",
+    "responsibilities", "we offer", "salary", "#вакансия", "#vacancy", "#job", "#hiring",
+]
 
 [discover.thresholds]
 # "живой": all three hold. "мертвяк": no post for dead_min_days or longer.
 # Everything in between is "сомнительный".
 alive_max_days = 3
 alive_min_posts_week = 3
-alive_min_qa_share = 0.10
+alive_min_vacancy_share = 0.10
 dead_min_days = 30
 
 [discover.score]
 # Weights of the 0..1 components; the score is 0..100.
 freshness = 0.25
 activity = 0.20
-qa = 0.35
+vacancies = 0.35
 engagement = 0.20
 # A component reaches 1.0 at these values.
 activity_target_posts_week = 7
-qa_target_share = 0.30
+vacancy_target_share = 0.30
 engagement_target = 0.10
 # Score is multiplied by (1 - junk_penalty * share of ads and reposts).
 junk_penalty = 0.5
