@@ -326,6 +326,18 @@ class TestContacts:
         text = "QA Engineer в TG @jobforqa\nПишите @hr_anna\n@qajobsoffers @relocatesme"
         assert extract_contacts(text, [], CFG, set()) == ["@hr_anna"]
 
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "Связаться с HR - @yarabotauuu",  # a real post (qajobsoffers, Oct 2026)
+            "Резюме: @hr_jobs_anna",
+            "TG: @remote_recruiter",
+        ],
+    )
+    def test_a_person_named_as_such_stays_whatever_the_handle(self, line):
+        handle = line.split("@")[1]
+        assert extract_contacts(line, [], CFG, set()) == [f"@{handle}"]
+
     def test_buttons(self):
         buttons = [
             ("Написать HR", "https://t.me/hr_anna"),
@@ -335,6 +347,15 @@ class TestContacts:
 
 
 class TestApplyUrls:
+    def test_linkedin_posts_and_notion_pages(self):
+        urls = [
+            "https://lnkd.in/p/ducmSETw",
+            "https://www.linkedin.com/posts/andrey-koltsov_sen-qa",
+            "https://openmygame.notion.site/QA-Engineer-1a2b",
+            "https://www.linkedin.com/company/acme",
+        ]
+        assert extract_apply_urls(urls, CFG) == urls[:3]
+
     def test_boards_forms_and_career_pages(self):
         urls = [
             "https://spb.hh.ru/vacancy/123",

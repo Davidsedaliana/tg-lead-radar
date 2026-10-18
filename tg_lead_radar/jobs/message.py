@@ -27,9 +27,10 @@ class Attachment:
 @dataclass(frozen=True)
 class Origin:
     """Where the vacancy really comes from: the channel a post was forwarded
-    from, or the post a short repost links to (then `text` is that post's)."""
+    from, the post a short repost links to, or the telegra.ph article a post
+    only names (for the last two `text` is the original's)."""
 
-    kind: str  # "forward" | "link"
+    kind: str  # "forward" | "link" | "telegraph"
     chat_id: int | None
     username: str | None
     title: str | None
@@ -37,9 +38,12 @@ class Origin:
     posted_at: datetime | None
     text: str | None = None
     views: int | None = None
+    url: str | None = None  # where the original lives when it is not a Telegram post
 
     @property
     def message_link(self) -> str | None:
+        if self.url:
+            return self.url
         if self.msg_id is None or (self.chat_id is None and not self.username):
             return None
         return message_link(self.username, self.chat_id or 0, self.msg_id)

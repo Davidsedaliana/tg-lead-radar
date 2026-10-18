@@ -9,6 +9,7 @@ from tg_lead_radar.config import Settings
 from tg_lead_radar.jobs.collector import JobsRadar, resolve_jobs_sources
 from tg_lead_radar.jobs.config import load_jobs_config
 from tg_lead_radar.jobs.store import JobsStore
+from tg_lead_radar.jobs.telegraph import Article
 
 CONFIG = load_jobs_config()
 
@@ -95,8 +96,13 @@ def settings(tmp_path, **overrides) -> Settings:
     return Settings(**base)
 
 
-def radar(client, store, tmp_path, sources=(QA,), **overrides) -> JobsRadar:
-    r = JobsRadar(client, store, settings(tmp_path, **overrides), CONFIG)
+def radar(client, store, tmp_path, sources=(QA,), articles=None, **overrides) -> JobsRadar:
+    """`articles` maps telegra.ph URLs to Article; anything else is not found."""
+
+    async def fetch(url):
+        return (articles or {}).get(url)
+
+    r = JobsRadar(client, store, settings(tmp_path, **overrides), CONFIG, fetch_article=fetch)
     r.entities = list(sources)
     r._refreshed_at = datetime.now(UTC)
     return r
@@ -319,3 +325,54 @@ class TestListPosts:
         assert await radar(client, store, tmp_path, sources=(QA, IT)).poll() == 2
         merged = next(r for r in store.records() if r["company"] == "Acme")
         assert [s["channel"] for s in merged["sources"]] == ["qa_jobs", "it_remote"]
+
+
+ARTICLE = Article(
+    url="https://telegra.ph/Senior-QA-Fullstack-10-06",
+    title="Senior QA Fullstack на Python",
+    text=(
+        "Компания: FinTech Lab\nФормат: удалёнка\nЗП: 300 000 – 350 000 ₽ на руки\n"
+        "Задачи:\n- автотесты на pytest и Playwright\nРезюме: @hr_anna"
+    ),
+)
+
+
+class TestTelegraph:
+    async def test_post_naming_an_article_gets_its_text(self, store, tmp_path):
+        post = "Senior QA Fullstack на Python\nПодробнее: https://telegra.ph/Senior-QA-Fullstack-10-06"
+        client = FakeClient({100: [msg(1, post)]})
+        await radar(client, store, tmp_path, articles={ARTICLE.url: ARTICLE}).poll()
+        [rec] = store.records()
+        assert rec["text"] == post
+        assert rec["original"]["kind"] == "telegraph"
+        assert rec["original"]["message_link"] == ARTICLE.url
+        assert rec["original"]["text"] == ARTICLE.text
+        # fields come from the article, the title from its heading
+        assert (rec["salary_from"], rec["salary_gross"]) == (300_000, False)
+        assert rec["company"] == "FinTech Lab" and rec["format"] == "remote"
+        assert rec["contacts"] == ["@hr_anna"]
+        assert rec["title"] == "Senior QA Fullstack на Python"
+
+    async def test_digest_lines_get_their_articles(self, store, tmp_path):
+        digest = (
+            "Подборка вакансий QA\n\n"
+            "- Senior QA Fullstack на Python (от 300 000 на руки) "
+            "(https://telegra.ph/Senior-QA-Fullstack-10-06)\n"
+            "- QA Lead (от 3000$) (https://telegra.ph/QA-Lead-10-06)"
+        )
+        client = FakeClient({100: [msg(1, digest)]})
+        await radar(client, store, tmp_path, articles={ARTICLE.url: ARTICLE}).poll()
+        recs = {r["title"]: r for r in store.records()}
+        assert recs["Senior QA Fullstack на Python (от 300 000 на руки)"]["contacts"] == [
+            "@hr_anna"
+        ]
+        lead = recs["QA Lead (от 3000$)"]
+        assert lead["original"] is None  # its article could not be fetched
+        assert (lead["salary_from"], lead["currency"]) == (3000, "USD")
+
+    async def test_unreachable_article_keeps_the_post(self, store, tmp_path):
+        post = "QA Engineer\nhttps://telegra.ph/QA-Engineer-10-06"
+        client = FakeClient({100: [msg(1, post)]})
+        await radar(client, store, tmp_path).poll()
+        [rec] = store.records()
+        assert rec["original"] is None and rec["title"] == "QA Engineer"

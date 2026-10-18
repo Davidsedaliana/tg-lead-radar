@@ -28,7 +28,8 @@ from .filters import match_job
 from .lists import ListItem, item_context, list_items
 from .message import Origin, RawPost, as_link_origin, build_raw_post
 from .store import JobsStore, Source, to_iso
-from .text import strip_links, unique
+from .telegraph import Article, article_path, fetch_article
+from .text import find_urls, strip_links, unique
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,13 @@ def _origin_dict(origin: Origin | None) -> dict | None:
     }
 
 
+def _article_origin(article: Article) -> Origin:
+    return Origin(
+        kind="telegraph", chat_id=None, username=None, title=article.title, msg_id=None,
+        posted_at=None, text=article.text, url=article.url,
+    )
+
+
 class JobsRadar:
     def __init__(
         self,
@@ -107,11 +115,13 @@ class JobsRadar:
         settings: Settings,
         config: JobsConfig,
         known_handles: Iterable[str] = (),
+        fetch_article=fetch_article,
     ):
         self.client = client
         self.store = store
         self.settings = settings
         self.config = config
+        self.fetch_article = fetch_article
         self.entities: list = []
         # Handles of channels we read are never an employer's contact.
         self._known = {h.lower() for h in known_handles}
@@ -221,7 +231,7 @@ class JobsRadar:
 
         items = list_items(scan)
         if items:
-            stored = self._process_list(post, origin, scan, items)
+            stored = await self._process_list(post, origin, scan, items)
             if stored:
                 return stored
             # No QA line in it: still judge the post as a whole below.
@@ -232,20 +242,30 @@ class JobsRadar:
                 logger.debug("Jobs: %s rejected (%s)", post.message_link, verdict.rejected_by)
             return []
         # A repost by link is just a wrapper: the original is the vacancy.
+        body = linked.text if linked else post.text
+        urls = unique(list(post.urls) + list(linked.urls if linked else ()))
+        title = None
+        article = None if origin else await self._single_article(urls)
+        if article:
+            origin, title = _article_origin(article), article.title
+            scan, body = f"{scan}\n\n{article.text}", article.text
+            urls = unique(urls + find_urls(article.text))
         return [self._store(
             post, origin,
             text=post.text,
             scan=scan,
-            body=linked.text if linked else post.text,
-            urls=unique(list(post.urls) + list(linked.urls if linked else ())),
+            body=body,
+            urls=urls,
             buttons=list(post.buttons) + list(linked.buttons if linked else ()),
             attachments=list(post.attachments) + list(linked.attachments if linked else ()),
             stems=verdict.stems,
+            title=title,
         )]
 
-    def _process_list(self, post: RawPost, origin, scan: str, items: list[ListItem]):
+    async def _process_list(self, post: RawPost, origin, scan: str, items: list[ListItem]):
         """"Подборка вакансий": every line with a QA title becomes a vacancy of
-        its own, with the post's shared lines as context."""
+        its own, with the post's shared lines as context. A line that leads to
+        a telegra.ph article gets the article as its full text."""
         rejected_by = match_job(scan, self.config.filter).rejected_by or ""
         if rejected_by.startswith(("anti:", "anti_title:")):
             return []  # an ad or a list of courses
@@ -258,16 +278,36 @@ class JobsRadar:
             verdict = match_job(text, self.config.filter)
             if not verdict.matched:
                 continue
+            item_scan, body, urls, item_origin = text, text, [item.url], origin
+            article = await self._article(item.url)
+            if article:
+                item_origin = _article_origin(article)
+                item_scan, body = f"{text}\n\n{article.text}", article.text
+                urls = unique(urls + find_urls(article.text))
             stored.append(self._store(
-                post, origin, text=text, scan=text, body=text, urls=[item.url], buttons=[],
-                attachments=[], stems=verdict.stems, item=(item.index, len(items)),
+                post, item_origin, text=text, scan=item_scan, body=body, urls=urls,
+                buttons=[], attachments=[], stems=verdict.stems,
+                # the digest line often carries the salary: "QA Lead (от 3000$)"
+                item=(item.index, len(items)), title=item.title,
             ))
         return stored
+
+    async def _article(self, url: str) -> Article | None:
+        if not article_path(url):
+            return None
+        article = await self.fetch_article(url)
+        await asyncio.sleep(0.3)  # a digest can hold dozens of articles
+        return article
+
+    async def _single_article(self, urls: list[str]) -> Article | None:
+        """A post that names one telegra.ph article keeps the vacancy there."""
+        articles = [u for u in urls if article_path(u)]
+        return await self._article(articles[0]) if len(articles) == 1 else None
 
     def _store(
         self, post: RawPost, origin: Origin | None, *, text: str, scan: str, body: str,
         urls: list[str], buttons: list, attachments: list, stems: list[str],
-        item: tuple[int, int] | None = None,
+        item: tuple[int, int] | None = None, title: str | None = None,
     ) -> tuple[str, bool]:
         exclude = self._known | {
             h.lower() for h in (post.username, origin.username if origin else None) if h
@@ -285,7 +325,7 @@ class JobsRadar:
         vacancy_id = fp.text_hash[:16]
         record = {
             "text": text,
-            "title": extract_title(body, self.config.dedup.generic_titles),
+            "title": title or extract_title(body, self.config.dedup.generic_titles),
             **fields,
             "links": urls,
             "attachments": [asdict(a) for a in attachments],

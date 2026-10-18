@@ -114,6 +114,13 @@ contact_skip_handles = [
     "job", "vacan", "vakans", "rabota", "offer", "career", "relocat", "remote",
     "channel", "news", "digest", "chat", "group",
 ]
+# ...unless the line says it is a person to write to: "Связаться с HR -
+# @yarabotauuu", "Резюме: @hr_jobs". "в TG @jobforqa" has no such word.
+contact_cues = [
+    "hr", "рекрутер*", "recruiter*", "связаться", "свяжитесь", "пиши*", "напиши*",
+    "контакт*", "contact*", "резюме", "cv", "tg:", "тг:", "telegram:", "телеграм:",
+    "лс", "dm", "по вопросам",
+]
 
 # A link is an apply link when its host is one of these (subdomains count;
 # an entry with a path also needs that path prefix)...
@@ -126,6 +133,8 @@ apply_domains = [
     "teamtailor.com", "recruitee.com", "personio.de", "wellfound.com",
     "docs.google.com/forms", "forms.gle", "forms.yandex.ru", "forms.yandex.com",
     "forms.office.com", "typeform.com", "tally.so", "airtable.com", "jotform.com",
+    # recruiters' LinkedIn posts and Notion vacancy pages ("More details in …'s post")
+    "lnkd.in", "linkedin.com/posts", "linkedin.com/feed", "notion.site",
 ]
 # ...or a host label / path segment contains one of these.
 apply_path_markers = [

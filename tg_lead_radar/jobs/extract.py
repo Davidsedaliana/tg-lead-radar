@@ -459,24 +459,27 @@ def extract_contacts(
     """@handles, emails, t.me/<person> and hidden user mentions. Lines that
     advertise the channel itself ("Подписывайтесь @…") are skipped, and so are
     `exclude` handles (the source channels)."""
-    found: list[str] = []
+    found: list[tuple[str, bool]] = []  # (contact, the line says it is a person)
     for line in text.split("\n"):
         if cfg.contact_skip.any(line):
             continue
-        found += [f"@{u}" for u in _USERNAME_RE.findall(line)]
-        found += find_emails(line)
-        found += [c for c in map(_contact_from_url, find_urls(line)) if c]
+        cued = cfg.contact_cues.any(line)
+        found += [(f"@{u}", cued) for u in _USERNAME_RE.findall(line)]
+        found += [(e, cued) for e in find_emails(line)]
+        found += [(c, cued) for c in map(_contact_from_url, find_urls(line)) if c]
     for label, url in buttons:
-        if not cfg.contact_skip.any(label):
-            contact = _contact_from_url(url)
-            if contact:
-                found.append(contact)
+        contact = _contact_from_url(url)
+        if contact and not cfg.contact_skip.any(label):
+            found.append((contact, cfg.contact_cues.any(label)))
     skip = {name.lower().lstrip("@") for name in exclude if name}
     kept = [
-        c for c in found
+        c for c, cued in found
         if c.lstrip("@").lower() not in skip
-        # "в TG @jobforqa", "@qajobsoffers": channels that carry vacancies, not people
-        and not (c.startswith("@") and any(m in c.lower() for m in cfg.contact_skip_handles))
+        # "в TG @jobforqa", "@qajobsoffers": channels that carry vacancies, not
+        # people — unless the line says to write there ("Связаться с HR - @…")
+        and (cued or not (
+            c.startswith("@") and any(m in c.lower() for m in cfg.contact_skip_handles)
+        ))
     ]
     return unique(kept) or None
 
