@@ -176,3 +176,17 @@ def test_old_database_is_migrated(tmp_path):
     cols = [r[1] for r in s._conn.execute("PRAGMA table_info(vacancy_sources)")]
     assert "item" in cols
     s.close()
+
+
+class TestRejected:
+    def test_rejected_posts_by_day(self, store):
+        store.add_rejected(1, 5, "https://t.me/qa/5", "QA", "2026-10-15T10:00:00+03:00",
+                           "anti: #резюме", "QA Engineer, 4 года")
+        store.add_rejected(1, 5, "https://t.me/qa/5", "QA", "2026-10-15T10:00:00+03:00",
+                           "anti: #резюме", "QA Engineer, 4 года")  # seen twice: kept once
+        assert store.rejected("2026-10-15") == [{
+            "message_link": "https://t.me/qa/5", "channel_title": "QA",
+            "posted_at": "2026-10-15T10:00:00+03:00", "reason": "anti: #резюме",
+            "title": "QA Engineer, 4 года",
+        }]
+        assert store.rejected("2026-10-16") == []

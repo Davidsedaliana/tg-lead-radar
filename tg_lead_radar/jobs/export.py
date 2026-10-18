@@ -176,16 +176,26 @@ def _channel_url(rec: dict) -> str | None:
     return rec.get("message_link")
 
 
-def render_digest(day: str, records: list[dict]) -> str:
+def render_digest(day: str, records: list[dict], rejected: list[dict] = ()) -> str:
     yyyy, mm, dd = day.split("-")
     channels = sorted({r.get("channel_title") or r.get("channel") or "?" for r in records})
     parts = [
         f"# Вакансии QA — {dd}.{mm}.{yyyy}",
         "",
-        f"Вакансий: {len(records)} · каналы: {', '.join(channels)}",
+        f"Вакансий: {len(records)} · каналы: {', '.join(channels) or '—'}",
     ]
     for i, rec in enumerate(records, 1):
         parts += ["", "---", "", render_vacancy(i, rec)]
+    if rejected:
+        # Posts with QA words the filter turned down: where a too strict
+        # anti-list in jobs.toml shows up.
+        parts += ["", "---", "", f"## Отсеяно фильтром ({len(rejected)})", ""]
+        for r in rejected:
+            when = format_published(r["posted_at"]) if r.get("posted_at") else ""
+            parts.append(
+                f"- {when} · {r.get('channel_title') or '?'} · `{r['reason']}` · "
+                f"{(r.get('title') or '—')[:80]} · {r.get('message_link') or ''}"
+            )
     return "\n".join(parts) + "\n"
 
 
@@ -223,7 +233,7 @@ def write_digests(store: JobsStore, out_dir: str | Path, days: set[str]) -> list
     written = []
     for day in sorted(days):
         path = out / f"{SOURCE}_{day}.md"
-        atomic_write(path, render_digest(day, store.records(dates={day})))
+        atomic_write(path, render_digest(day, store.records(dates={day}), store.rejected(day)))
         written.append(path)
     return written
 

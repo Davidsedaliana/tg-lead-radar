@@ -69,6 +69,18 @@ CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS jobs_rejected (
+    chat_id INTEGER NOT NULL,
+    msg_id INTEGER NOT NULL,
+    message_link TEXT,
+    channel_title TEXT,
+    posted_at TEXT,
+    reason TEXT NOT NULL,
+    title TEXT,
+    seen_at TEXT NOT NULL,
+    PRIMARY KEY (chat_id, msg_id)
+);
+CREATE INDEX IF NOT EXISTS jobs_rejected_posted ON jobs_rejected (posted_at);
 """
 
 
@@ -313,6 +325,29 @@ class JobsStore:
 
     def count(self) -> int:
         return self._conn.execute("SELECT COUNT(*) FROM vacancies").fetchone()[0]
+
+    # --- rejected posts, for tuning the filter ---
+
+    def add_rejected(
+        self, chat_id: int, msg_id: int, message_link: str, channel_title: str,
+        posted_at: str | None, reason: str, title: str,
+    ) -> None:
+        """A post with QA words that the filter turned down, and why."""
+        self._conn.execute(
+            "INSERT OR IGNORE INTO jobs_rejected (chat_id, msg_id, message_link, channel_title, "
+            "posted_at, reason, title, seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (chat_id, msg_id, message_link, channel_title, posted_at, reason, title, now_iso()),
+        )
+        self._conn.commit()
+
+    def rejected(self, day: str) -> list[dict]:
+        """Posts of this day (YYYY-MM-DD, Moscow time) the filter turned down."""
+        rows = self._conn.execute(
+            "SELECT message_link, channel_title, posted_at, reason, title FROM jobs_rejected "
+            "WHERE substr(posted_at, 1, 10) = ? ORDER BY posted_at",
+            (day,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     # --- export ---
 

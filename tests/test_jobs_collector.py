@@ -376,3 +376,16 @@ class TestTelegraph:
         await radar(client, store, tmp_path).poll()
         [rec] = store.records()
         assert rec["original"] is None and rec["title"] == "QA Engineer"
+
+
+async def test_rejected_qa_posts_go_to_the_digest(store, tmp_path):
+    client = FakeClient({100: [
+        msg(1, "#резюме QA Engineer, 4 года, pytest", days_ago=1),
+        msg(2, "Продам гараж", days_ago=1),  # no QA words: not worth listing
+    ]})
+    await radar(client, store, tmp_path).poll()
+    [digest] = list((tmp_path / "out").glob("tg_*.md"))
+    text = digest.read_text(encoding="utf-8")
+    assert "## Отсеяно фильтром (1)" in text
+    assert "`anti: #резюме`" in text and "https://t.me/qa_jobs/1" in text
+    assert "гараж" not in text

@@ -122,6 +122,7 @@ class JobsRadar:
         self.settings = settings
         self.config = config
         self.fetch_article = fetch_article
+        self._rejected_days: set[str] = set()  # digests to rebuild for rejected posts
         self.entities: list = []
         # Handles of channels we read are never an employer's contact.
         self._known = {h.lower() for h in known_handles}
@@ -151,6 +152,7 @@ class JobsRadar:
         """One pass over all sources. Returns the number of new vacancies."""
         await self.refresh_sources()
         new_total, days = 0, set()
+        self._rejected_days = set()
         for entity in self.entities:
             try:
                 new, touched = await self.poll_channel(entity)
@@ -164,6 +166,7 @@ class JobsRadar:
             new_total += new
             days |= touched
             await asyncio.sleep(1)  # be gentle with the API between sources
+        days |= self._rejected_days
         if days:
             write_digests(self.store, self.settings.jobs_export_dir, days)
         return new_total
@@ -240,6 +243,7 @@ class JobsRadar:
         if not verdict.matched:
             if verdict.rejected_by:
                 logger.debug("Jobs: %s rejected (%s)", post.message_link, verdict.rejected_by)
+                self._note_rejected(post, verdict.rejected_by)
             return []
         # A repost by link is just a wrapper: the original is the vacancy.
         body = linked.text if linked else post.text
@@ -291,6 +295,17 @@ class JobsRadar:
                 item=(item.index, len(items)), title=item.title,
             ))
         return stored
+
+    def _note_rejected(self, post: RawPost, reason: str) -> None:
+        """Posts with QA words that the filter turned down go to the day's
+        digest: that is where a too strict anti-list shows."""
+        posted = to_iso(post.posted_at)
+        self.store.add_rejected(
+            post.chat_id, post.msg_id, post.message_link, post.title, posted, reason,
+            extract_title(post.text, self.config.dedup.generic_titles),
+        )
+        if posted:
+            self._rejected_days.add(posted[:10])
 
     async def _article(self, url: str) -> Article | None:
         if not article_path(url):
