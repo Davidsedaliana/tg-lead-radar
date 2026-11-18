@@ -52,18 +52,15 @@ class SpikeDetector:
         while self._times and self._times[0] < horizon:
             self._times.popleft()
 
-    def check(self, now: float) -> Spike | None:
-        if self._started is None or now - self._last_spike < self.cooldown:
+    def stats(self, now: float) -> tuple[int, float] | None:
+        """(messages in the current window, usual number per window); None while warming up."""
+        if self._started is None:
             return None
         window_start = now - self.window
         history = min(self.baseline_seconds, window_start - self._started)
         if history < self.warmup:
             return None
-
         current = sum(1 for t in self._times if t > window_start)
-        if current < self.min_messages:
-            return None
-
         n_buckets = int(history // self.window)
         buckets = [0] * n_buckets
         for t in self._times:
@@ -72,10 +69,17 @@ class SpikeDetector:
             idx = int((window_start - t) // self.window)
             if idx < n_buckets:
                 buckets[idx] += 1
-        usual = max(statistics.median(buckets), 1.0)
+        return current, max(statistics.median(buckets), 1.0)
 
+    def check(self, now: float) -> Spike | None:
+        if now - self._last_spike < self.cooldown:
+            return None
+        stats = self.stats(now)
+        if stats is None:
+            return None
+        current, usual = stats
         ratio = current / usual
-        if ratio < self.mult:
+        if current < self.min_messages or ratio < self.mult:
             return None
         self._last_spike = now
         return Spike(ts=now, ratio=ratio, count=current)

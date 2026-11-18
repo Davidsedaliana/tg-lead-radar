@@ -115,3 +115,46 @@ async def test_statuses_for_the_list(tmp_path):
         }
     finally:
         await clipper.close()
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg is not installed")
+async def test_tryout_reports_what_it_sees(tmp_path, capsys):
+    from twitch_clipper import tryout
+
+    cfg = Settings(data_dir=tmp_path, games=(GTA6,), segment_seconds=1, offline_poll_seconds=1)
+    playing = {"gta": StreamInfo(GTA6, ""), "chat": StreamInfo("Just Chatting", ""), "off": None}
+
+    def probe_factory(name):
+        async def probe():
+            return playing[name]
+
+        return probe
+
+    saved = await tryout.run(
+        cfg,
+        ["gta", "chat", "off"],
+        minutes=0.2,
+        source_factory=lambda name: lambda: FAKE_STREAM,
+        probe_factory=probe_factory,
+    )
+    out = capsys.readouterr().out
+    assert saved == []
+    assert f"Игры: {GTA6}" in out
+    assert f"gta              пишу · {GTA6} · чат: коплю статистику" in out
+    assert "chat             в эфире, но другая игра: Just Chatting" in out
+    assert "off              не в эфире" in out
+    assert "Клипов сохранено: 0" in out
+
+
+def test_unexpected_error_ignores_plain_offline():
+    from twitch_clipper.recorder import unexpected_error
+
+    offline = b'{"error": "No playable streams found on this URL: https://www.twitch.tv/x"}'
+    assert unexpected_error(offline) == ""
+    assert unexpected_error(b"error: No playable streams found on this URL: x\n") == ""
+    assert unexpected_error(b"") == ""
+    broken = b'{"error": "Unable to open URL: https://gql.twitch.tv/gql (403 Forbidden)"}'
+    assert "403 Forbidden" in unexpected_error(broken)
+    assert unexpected_error(b"warning: x\nerror: No module named streamlink\n") == (
+        "error: No module named streamlink"
+    )

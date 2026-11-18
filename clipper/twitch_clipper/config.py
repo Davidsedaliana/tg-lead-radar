@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import dataclasses
+import logging
 import os
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +22,17 @@ def load_dotenv(path: str | Path = ".env") -> None:
         key, _, value = line.partition("=")
         value = value.strip().strip("'\"")
         os.environ.setdefault(key.strip(), value)
+
+
+def setup_console() -> None:
+    """Logging plus UTF-8 output: Windows consoles choke on emoji and Cyrillic otherwise."""
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(AttributeError, ValueError):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
+    logging.getLogger("aiogram.event").setLevel(logging.WARNING)
 
 
 def normalize_login(name: str) -> str:
@@ -60,8 +74,10 @@ class Settings:
     timezone: str = "Europe/Moscow"
 
     # judge
-    judge_enabled: bool = False
-    judge_model: str = "claude-opus-5-5"
+    # "deepseek", "anthropic" or "" (no scoring). Unset: picked by which API key is present.
+    judge_provider: str = ""
+    judge_model: str = ""  # empty: the provider's default
+    deepseek_base_url: str = "https://api.deepseek.com"
     min_score: int = 6
     whisper_model: str = ""
     whisper_language: str = "ru"
@@ -89,8 +105,9 @@ class Settings:
                 values[f.name] = tuple(n for n in (clean(x) for x in raw.split(",")) if n)
             else:
                 values[f.name] = raw
-        if "JUDGE_ENABLED" not in env:
-            values["judge_enabled"] = bool(
-                env.get("ANTHROPIC_API_KEY") or env.get("ANTHROPIC_AUTH_TOKEN")
-            )
+        if "judge_provider" not in values:
+            if env.get("DEEPSEEK_API_KEY"):
+                values["judge_provider"] = "deepseek"
+            elif env.get("ANTHROPIC_API_KEY") or env.get("ANTHROPIC_AUTH_TOKEN"):
+                values["judge_provider"] = "anthropic"
         return cls(**values)  # type: ignore[arg-type]

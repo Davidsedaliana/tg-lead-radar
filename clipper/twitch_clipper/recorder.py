@@ -18,6 +18,7 @@ from .media import mean_volume
 log = logging.getLogger(__name__)
 
 SILENCE_DB = -60.0
+OFFLINE_MARK = "No playable streams"  # what streamlink says about a streamer who is not live
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,18 @@ def parse_probe(output: bytes) -> StreamInfo | None:
     return StreamInfo(category=meta.get("category") or "", title=meta.get("title") or "")
 
 
+def unexpected_error(output: bytes | str) -> str:
+    """The last line of streamlink's complaint, unless it only says 'offline'."""
+    if isinstance(output, bytes):
+        output = output.decode("utf-8", errors="replace")
+    with contextlib.suppress(ValueError, AttributeError):
+        output = str(json.loads(output).get("error", ""))
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    if not lines or any(OFFLINE_MARK in line for line in lines):
+        return ""
+    return lines[-1][:300]
+
+
 async def streamlink_probe(name: str) -> StreamInfo | None:
     """Ask Twitch whether the streamer is live and what they are playing."""
     proc = await asyncio.create_subprocess_exec(
@@ -65,7 +78,10 @@ async def streamlink_probe(name: str) -> StreamInfo | None:
             proc.kill()
         await proc.wait()
         raise
-    return parse_probe(out)
+    info = parse_probe(out)
+    if info is None and (problem := unexpected_error(out)):
+        raise RuntimeError(problem)
+    return info
 
 
 Probe = Callable[[], Awaitable[StreamInfo | None]]
@@ -109,6 +125,7 @@ class Recorder:
         self.info: StreamInfo | None = None  # what the last check saw; None when offline
         self._levels: dict[str, float] = {}
         self._recording = False
+        self._last_problem = ""
         self._newest = 0.0  # mtime of the newest segment, refreshed every second
         self._task: asyncio.Task[None] | None = None
 
@@ -180,15 +197,18 @@ class Recorder:
         read_fd, write_fd = os.pipe()
         procs: list[asyncio.subprocess.Process] = []
         watcher: asyncio.Task[None] | None = None
+        complaints: asyncio.Task[bytes] | None = None
         try:
             try:
                 source = await asyncio.create_subprocess_exec(
                     *self._source_cmd(),
                     stdin=asyncio.subprocess.DEVNULL,
                     stdout=write_fd,
-                    stderr=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.PIPE,
                 )
                 procs.append(source)
+                assert source.stderr is not None
+                complaints = asyncio.create_task(source.stderr.read())
                 ffmpeg = await asyncio.create_subprocess_exec(
                     "ffmpeg", "-hide_banner", "-loglevel", "error",
                     "-fflags", "+genpts", "-i", "pipe:0",
@@ -222,7 +242,13 @@ class Recorder:
             for p in procs:
                 await _terminate(p)
             if was_live:
-                log.info("[%s] stream ended", self.name)
+                log.info("[%s] recording stopped", self.name)
+            elif complaints is not None:
+                # Nothing was recorded: say why, unless the streamer is simply offline.
+                problem = unexpected_error(await complaints)
+                if problem and problem != self._last_problem:
+                    log.warning("[%s] cannot record: %s", self.name, problem)
+                self._last_problem = problem
 
     async def _watch(self) -> None:
         announced = False

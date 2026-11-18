@@ -5,7 +5,7 @@ import pytest
 from twitch_clipper.bot import streamers_view, vote_keyboard
 from twitch_clipper.chat import parse_privmsg
 from twitch_clipper.config import Settings, normalize_login
-from twitch_clipper.judge import build_content, parse_verdict
+from twitch_clipper.judge import Moment, describe, parse_verdict
 from twitch_clipper.store import Store
 from twitch_clipper.text import build_caption, guess_category, sample_chat
 
@@ -54,8 +54,11 @@ def test_settings_from_env():
     assert cfg.chat_mult == 2.5
     assert cfg.vertical is False
     assert cfg.min_score == 6  # empty value keeps the default
-    assert cfg.judge_enabled is True
-    assert Settings.from_env({}).judge_enabled is False
+    assert cfg.judge_provider == "anthropic"
+    assert Settings.from_env({}).judge_provider == ""
+    both = {"DEEPSEEK_API_KEY": "d", "ANTHROPIC_API_KEY": "a"}
+    assert Settings.from_env(both).judge_provider == "deepseek"
+    assert Settings.from_env({**both, "JUDGE_PROVIDER": "anthropic"}).judge_provider == "anthropic"
 
 
 def test_sample_chat_prefers_repeated_messages():
@@ -125,17 +128,17 @@ def test_streamers_view_and_keyboards():
     assert [b.callback_data for b in row] == ["v:7:1", "v:7:-1"]
 
 
-def test_judge_content_and_verdict():
-    content = build_content(
-        "buster", "Grand Theft Auto VI", ["АХАХА"], "ну всё", [b"\xff\xd8jpeg"], 3.0, None
-    )
-    assert "Игра: Grand Theft Auto VI" in content[-1]["text"]
-    assert [block["type"] for block in content] == ["image", "text"]
-    assert "<chat>\n- АХАХА\n</chat>" in content[-1]["text"]
-    assert "<transcript>\nну всё\n</transcript>" in content[-1]["text"]
-    assert "Громкость" not in content[-1]["text"]
+def test_judge_text_and_verdict():
+    moment = Moment("buster", "Grand Theft Auto VI", ["АХАХА"], "ну всё", [], 3.0, None)
+    text = describe(moment)
+    assert "Игра: Grand Theft Auto VI" in text
+    assert "<chat>\n- АХАХА\n</chat>" in text
+    assert "<transcript>\nну всё\n</transcript>" in text
+    assert "Громкость" not in text
 
     verdict = parse_verdict(json.dumps({"score": 14, "category": "nope", "summary": " a  b "}))
     assert (verdict.score, verdict.category, verdict.summary) == (10, "other", "a b")
+    fenced = '```json\n{"score": 7, "category": "funny", "summary": "ок"}\n```'
+    assert parse_verdict(fenced).score == 7
     with pytest.raises(ValueError):
         parse_verdict("not json")

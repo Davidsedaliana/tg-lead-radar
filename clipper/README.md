@@ -24,6 +24,39 @@ Twitch ──> streamlink ──> ffmpeg: кольцевой буфер, пос�
 💬 ПХАХАХАХАХАХА
 ```
 
+## Проба на своём компьютере, без Telegram
+
+Самый быстрый способ посмотреть, как бот работает с настоящим Twitch. Нужны
+Python 3.11+, git и ffmpeg (Windows: `winget install Gyan.FFmpeg`, потом открой
+новое окно терминала).
+
+Windows (PowerShell):
+
+```powershell
+git clone -b claude/trusting-hypatia-12r9fx https://github.com/Davidsedaliana/tg-lead-radar
+cd tg-lead-radar\clipper
+python -m venv .venv
+.venv\Scripts\pip install -e .
+copy .env.example .env
+.venv\Scripts\python -m twitch_clipper.tryout buster evelone192 --minutes 30
+```
+
+macOS / Linux: то же самое, но `.venv/bin/pip`, `.venv/bin/python` и `cp`.
+
+Что происходит:
+
+- каждые 10 секунд печатается строка по каждому стримеру: в эфире ли он, во что
+  играет и сколько сообщений в чате против обычного (`чат: 42 за 10с (обычно 14,
+  x3.0)`);
+- когда чат подскакивает выше порога, клип и подпись к нему сохраняются в
+  `data/out/`;
+- `--any-game` отключает фильтр по игре: удобно, если в GTA 6 сейчас никто из
+  списка не играет;
+- токен Telegram не нужен; ключ нейросети тоже, но с ним в подписи появится оценка.
+
+Если стример точно в эфире, а бот пишет «не в эфире», смотри строки `WARNING`
+в выводе: там причина (нет сети до Twitch, не установлен streamlink и так далее).
+
 ## Запуск на VPS (Ubuntu / Debian)
 
 ```bash
@@ -87,13 +120,14 @@ journalctl -u twitch-clipper -f   # логи
 GPU не нужен: оценку делает модель через API, сервер только отправляет ей три
 кадра, сообщения чата и цифры всплеска.
 
-- Впиши `ANTHROPIC_API_KEY` в `.env`. Без ключа бот шлёт все найденные моменты
-  без оценки.
+- **DeepSeek (по умолчанию):** впиши `DEEPSEEK_API_KEY` в `.env`. Модель -
+  `deepseek-flash`, другую можно задать в `JUDGE_MODEL`. Если модель не принимает
+  картинки, бот сам переключится на оценку только по чату и расшифровке.
+- **Claude:** впиши `ANTHROPIC_API_KEY` и `JUDGE_PROVIDER=anthropic`.
+- Без ключа бот шлёт все найденные моменты без оценки.
 - `MIN_SCORE=6`: клипы с оценкой ниже не отправляются.
-- `JUDGE_MODEL`: по умолчанию `claude-opus-5-5`. Для экономии можно поставить
-  `claude-haiku-5-5`: она в десятки раз дешевле, но оценивает грубее.
-- Расшифровка речи необязательна и тоже идёт на CPU:
-  `.venv/bin/pip install -e ".[whisper]"` и `WHISPER_MODEL=small`.
+- Расшифровка речи необязательна и идёт на CPU:
+  `pip install -e ".[whisper]"` и `WHISPER_MODEL=small`.
 
 ## Какой нужен сервер
 

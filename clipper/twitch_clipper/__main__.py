@@ -3,27 +3,24 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import shutil
 import signal
 import sys
 
 from .bot import ClipBot
 from .clipper import Clipper
-from .config import Settings, load_dotenv
-from .judge import Judge, Transcriber
+from .config import Settings, load_dotenv, setup_console
+from .judge import Transcriber, make_judge
 from .store import Store
 
 log = logging.getLogger("twitch_clipper")
 
 
 async def main() -> None:
+    setup_console()
     load_dotenv()
     cfg = Settings.from_env()
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
-    )
-    logging.getLogger("aiogram.event").setLevel(logging.WARNING)
-    logging.getLogger("httpx").setLevel(logging.WARNING)
 
     if not cfg.bot_token:
         sys.exit("BOT_TOKEN is not set: copy .env.example to .env and fill it in")
@@ -40,7 +37,10 @@ async def main() -> None:
 
     store = Store(cfg.data_dir / "clipper.db")
     store.seed(cfg.streamers)
-    judge = Judge(cfg.judge_model) if cfg.judge_enabled else None
+    try:
+        judge = make_judge(cfg.judge_provider, cfg.judge_model, cfg.deepseek_base_url, os.environ)
+    except ValueError as e:
+        sys.exit(str(e))
     transcriber = (
         Transcriber(cfg.whisper_model, cfg.whisper_language) if cfg.whisper_model else None
     )
@@ -57,7 +57,7 @@ async def main() -> None:
             "started: %d streamers, games: %s, scoring %s",
             len(store.streamers()),
             ", ".join(cfg.games) or "any",
-            f"with {cfg.judge_model}" if judge else "off (no ANTHROPIC_API_KEY)",
+            f"with {judge.model}" if judge else "off (no API key)",
         )
         await asyncio.gather(bot.run(), clipper.run())
     finally:

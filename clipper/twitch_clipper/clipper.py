@@ -10,7 +10,7 @@ from pathlib import Path
 from .chat import ChatMessage, TwitchChat
 from .config import Settings
 from .detector import Spike, SpikeDetector
-from .judge import Judge, Transcriber
+from .judge import Judge, Moment, Transcriber
 from .media import concat_segments, grab_frames, render
 from .recorder import Probe, Recorder
 from .store import Store
@@ -71,6 +71,11 @@ class Clipper:
             else:
                 result[name] = ("offline", "")
         return result
+
+    def chat_stats(self, name: str) -> tuple[int, float] | None:
+        """(messages in the last window, usual number); None while there is no baseline yet."""
+        detector = self._detectors.get(name)
+        return detector.stats(time.time()) if detector else None
 
     async def sync(self) -> None:
         """Start and stop recorders so they match the list in the database."""
@@ -189,7 +194,7 @@ class Clipper:
                 transcript = await self.transcriber.transcribe(out) if self.transcriber else ""
                 game = rec.info.category if rec.info else ""
                 verdict = await self.judge.rate(
-                    name, game, chat_lines, transcript, frames, spike.ratio, audio_mult
+                    Moment(name, game, chat_lines, transcript, frames, spike.ratio, audio_mult)
                 )
                 if verdict is not None and verdict.score < cfg.min_score:
                     log.info("[%s] scored %d/10 (%s), not sent", name, verdict.score,
