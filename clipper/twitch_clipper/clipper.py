@@ -110,11 +110,15 @@ class Clipper:
             self._detectors.pop(name, None)
             self._messages.pop(name, None)
             log.info("[%s] stopped watching", name)
-        for name in wanted - set(self.recorders):
+        new = sorted(wanted - set(self.recorders))
+        # Every streamer is checked once per offline_poll_seconds. Starting them a little
+        # apart keeps those checks from all landing in the same second.
+        spacing = min(2.0, self.cfg.offline_poll_seconds / max(len(new), 1))
+        for i, name in enumerate(new):
             source = self._source_factory(name) if self._source_factory else None
             probe = self._probe_factory(name) if self._probe_factory else None
             rec = Recorder(name, self.cfg, source_cmd=source, probe=probe)
-            rec.start()
+            rec.start(delay=i * spacing)
             self.recorders[name] = rec
             self._detectors[name] = SpikeDetector(
                 window=self.cfg.chat_window,

@@ -1,6 +1,7 @@
 """The game filter: record only while the streamer is in an allowed Twitch category."""
 
 import asyncio
+import itertools
 import json
 import shutil
 
@@ -158,3 +159,32 @@ def test_unexpected_error_ignores_plain_offline():
     assert unexpected_error(b"warning: x\nerror: No module named streamlink\n") == (
         "error: No module named streamlink"
     )
+
+
+async def test_many_streamers_are_checked_one_after_another(tmp_path):
+    cfg = Settings(data_dir=tmp_path, games=(GTA6,), offline_poll_seconds=3)
+    store = Store(":memory:")
+    names = [f"streamer{i:02d}" for i in range(6)]
+    for name in names:
+        store.add_streamer(name)
+    checked: list[tuple[str, float]] = []
+    started = asyncio.get_running_loop().time()
+
+    def probe_factory(name):
+        async def probe():
+            checked.append((name, asyncio.get_running_loop().time() - started))
+            return None
+
+        return probe
+
+    clipper = Clipper(cfg, store, probe_factory=probe_factory)
+    await clipper.sync()
+    try:
+        await asyncio.sleep(2.9)
+    finally:
+        await clipper.close()
+    assert [name for name, _ in checked] == names  # each one once, in order
+    times = [t for _, t in checked]
+    assert times[0] < 0.2  # the first check is immediate
+    gaps = [b - a for a, b in itertools.pairwise(times)]
+    assert all(0.4 < gap < 0.7 for gap in gaps)  # 3 seconds / 6 streamers

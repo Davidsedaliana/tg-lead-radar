@@ -131,9 +131,10 @@ class Recorder:
 
     # ---- lifecycle -------------------------------------------------------
 
-    def start(self) -> None:
+    def start(self, delay: float = 0.0) -> None:
+        """Start watching; `delay` spreads the checks of many streamers over time."""
         if self._task is None:
-            self._task = asyncio.create_task(self._run(), name=f"rec-{self.name}")
+            self._task = asyncio.create_task(self._run(delay), name=f"rec-{self.name}")
 
     async def stop(self) -> None:
         if self._task is not None:
@@ -179,7 +180,8 @@ class Recorder:
                 log.info("[%s] switched to another game, recording paused", self.name)
                 return
 
-    async def _run(self) -> None:
+    async def _run(self, delay: float = 0.0) -> None:
+        await asyncio.sleep(delay)
         while True:
             try:
                 if self._probe is None or await self._check():
