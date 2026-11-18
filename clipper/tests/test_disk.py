@@ -101,3 +101,23 @@ def test_dotenv_written_by_notepad(tmp_path, monkeypatch):
     load_dotenv(env)
     assert os.environ.pop("CLIPPER_TEST_TOKEN") == "123:abc"
     assert os.environ.pop("CLIPPER_TEST_Q") == "q"
+
+
+async def test_run_cleans_up_without_leaving_the_database_thread(tmp_path):
+    """Clipper.run() itself must do the cleanup: SQLite refuses calls from another thread."""
+    import asyncio
+
+    store = Store(tmp_path / "clipper.db")
+    _, old_path = clip_with_source(store, tmp_path, 1, age=25 * 3600)
+    orphan = touch(tmp_path / "sources" / "999.ts")
+    clipper = Clipper(Settings(data_dir=tmp_path, keep_source_hours=24), store)
+
+    task = asyncio.create_task(clipper.run())
+    await asyncio.sleep(0.5)
+    assert not task.done(), task.exception() if task.done() else None
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    await clipper.close()
+
+    assert not orphan.exists()  # start-up cleanup ran
+    assert not old_path.exists()  # and so did the periodic one

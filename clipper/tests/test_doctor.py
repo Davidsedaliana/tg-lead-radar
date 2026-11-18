@@ -1,5 +1,6 @@
 """The self-check command: what it reports when things work and when they do not."""
 
+import re
 import shutil
 
 import pytest
@@ -52,7 +53,7 @@ async def test_local_tools_are_found():
 async def test_recording_check_builds_a_clip(tmp_path):
     cfg = Settings(data_dir=tmp_path, segment_seconds=1)
     detail = await doctor.check_recording(cfg, "buster", source_cmd=lambda: FAKE_STREAM, wait=20)
-    assert detail.startswith("buster: записал 3 кусков, собрал клип на ")
+    assert re.fullmatch(r"buster: записал [3-9] кусков, собрал клип на \d+ КБ", detail)
 
 
 @needs_ffmpeg

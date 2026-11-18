@@ -139,7 +139,8 @@ class Clipper:
         self.chat.set_channels(wanted)
 
     async def run(self) -> None:
-        await asyncio.to_thread(self.clean_leftovers)
+        # Both cleanups touch the database, and SQLite only allows the thread that opened it.
+        self.clean_leftovers()
         await self.sync()
         self._spawn(self._janitor())
         await self.chat.run()
@@ -163,7 +164,7 @@ class Clipper:
 
     async def _janitor(self) -> None:
         while True:
-            await asyncio.to_thread(self.clean_sources)
+            self.clean_sources()
             await asyncio.sleep(600)
 
     def clean_sources(self) -> None:
