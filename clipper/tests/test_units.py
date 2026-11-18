@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from twitch_clipper.bot import streamers_view, vote_keyboard
+from twitch_clipper.bot import clip_keyboard, streamers_view
 from twitch_clipper.chat import parse_privmsg
 from twitch_clipper.config import Settings, normalize_login
 from twitch_clipper.judge import Moment, describe, parse_verdict
@@ -123,7 +123,17 @@ def test_streamers_view_and_keyboards():
     assert [b.callback_data for b in buttons] == ["t:buster", "t:steel"]
     assert streamers_view([], {})[1] is None
 
-    row = vote_keyboard(7, likes=2).inline_keyboard[0]
+    keyboard = clip_keyboard(7, likes=2)
+    assert [[b.text for b in row] for row in keyboard.inline_keyboard[1:]] == [
+        ["⏪ +10с в начало", "+10с в конец ⏩"],
+        ["✂️ −5с с начала", "−5с с конца ✂️"],
+    ]
+    assert [[b.callback_data for b in row] for row in keyboard.inline_keyboard[1:]] == [
+        ["x:7:s-10", "x:7:e+10"],
+        ["x:7:s+5", "x:7:e-5"],
+    ]
+    assert len(clip_keyboard(7, trim=False).inline_keyboard) == 1
+    row = keyboard.inline_keyboard[0]
     assert [b.text for b in row] == ["👍 2", "👎"]
     assert [b.callback_data for b in row] == ["v:7:1", "v:7:-1"]
 

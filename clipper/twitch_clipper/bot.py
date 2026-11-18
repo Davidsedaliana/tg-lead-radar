@@ -3,7 +3,9 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Awaitable, Callable
+from contextlib import AbstractAsyncContextManager
 from pathlib import Path
+from typing import Protocol
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -13,9 +15,11 @@ from aiogram.types import (
     FSInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    InputMediaVideo,
     Message,
 )
 
+from .clipper import TrimError, TrimPlan
 from .config import Settings, normalize_login
 from .store import Store
 
@@ -27,23 +31,45 @@ HELP = (
     "Я записываю стримы и присылаю сюда моменты, на которых чат взрывается.\n\n"
     "/list - стримеры и кто сейчас в эфире\n"
     "/add логин - добавить стримера\n"
-    "/remove логин - убрать стримера"
+    "/remove логин - убрать стримера\n\n"
+    "Под клипом: 👍 👎 - оценить, остальные кнопки двигают начало и конец клипа."
+)
+
+# Button text -> action understood by Clipper.plan_trim, two buttons per row.
+TRIM_BUTTONS = (
+    (("⏪ +10с в начало", "s-10"), ("+10с в конец ⏩", "e+10")),
+    (("✂️ −5с с начала", "s+5"), ("−5с с конца ✂️", "e-5")),
 )
 
 
-def vote_keyboard(clip_id: int, likes: int = 0, dislikes: int = 0) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text=f"👍 {likes}" if likes else "👍", callback_data=f"v:{clip_id}:1"
-                ),
-                InlineKeyboardButton(
-                    text=f"👎 {dislikes}" if dislikes else "👎", callback_data=f"v:{clip_id}:-1"
-                ),
-            ]
+class Trimmer(Protocol):
+    def plan_trim(self, clip_id: int, action: str) -> TrimPlan: ...
+
+    def trimmed(self, plan: TrimPlan) -> AbstractAsyncContextManager[Path]: ...
+
+
+def clip_keyboard(
+    clip_id: int, likes: int = 0, dislikes: int = 0, trim: bool = True
+) -> InlineKeyboardMarkup:
+    rows = [
+        [
+            InlineKeyboardButton(
+                text=f"👍 {likes}" if likes else "👍", callback_data=f"v:{clip_id}:1"
+            ),
+            InlineKeyboardButton(
+                text=f"👎 {dislikes}" if dislikes else "👎", callback_data=f"v:{clip_id}:-1"
+            ),
         ]
-    )
+    ]
+    if trim:
+        rows += [
+            [
+                InlineKeyboardButton(text=text, callback_data=f"x:{clip_id}:{action}")
+                for text, action in row
+            ]
+            for row in TRIM_BUTTONS
+        ]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 _ICONS = {"recording": "🔴", "other_game": "🟡", "offline": "⚫"}
@@ -81,11 +107,13 @@ class ClipBot:
         store: Store,
         statuses: Callable[[], dict[str, tuple[str, str]]],
         on_change: Callable[[], Awaitable[None]],
+        trimmer: Trimmer | None = None,
     ) -> None:
         self.cfg = cfg
         self.store = store
         self._statuses = statuses
         self._on_change = on_change
+        self._trimmer = trimmer if cfg.keep_source_hours > 0 else None
         self.bot = Bot(cfg.bot_token)
         self.dp = Dispatcher()
         self.dp.include_router(self._router())
@@ -102,9 +130,13 @@ class ClipBot:
             width=width,
             height=height,
             supports_streaming=True,
-            reply_markup=vote_keyboard(clip_id),
+            reply_markup=self._keyboard(clip_id),
             request_timeout=300,
         )
+
+    def _keyboard(self, clip_id: int) -> InlineKeyboardMarkup:
+        likes, dislikes = self.store.votes(clip_id)
+        return clip_keyboard(clip_id, likes, dislikes, trim=self._trimmer is not None)
 
     def _router(self) -> Router:
         router = Router()
@@ -183,17 +215,52 @@ class ClipBot:
         async def vote(query: CallbackQuery) -> None:
             try:
                 _, clip_id, value = (query.data or "").split(":")
-                likes, dislikes = store.vote(int(clip_id), query.from_user.id, int(value))
+                store.vote(int(clip_id), query.from_user.id, int(value))
             except ValueError:
                 await query.answer()
                 return
             await query.answer("Учёл")
             if isinstance(query.message, Message):
                 try:
-                    await query.message.edit_reply_markup(
-                        reply_markup=vote_keyboard(int(clip_id), likes, dislikes)
-                    )
+                    await query.message.edit_reply_markup(reply_markup=self._keyboard(int(clip_id)))
                 except TelegramBadRequest as e:
                     log.debug("votes not updated: %s", e)
+
+        @router.callback_query(F.data.startswith("x:"))
+        async def trim(query: CallbackQuery) -> None:
+            if self._trimmer is None or not isinstance(query.message, Message):
+                await query.answer("Подрезка выключена")
+                return
+            try:
+                _, raw_id, action = (query.data or "").split(":")
+                clip_id = int(raw_id)
+                plan = self._trimmer.plan_trim(clip_id, action)
+            except ValueError:
+                await query.answer()
+                return
+            except TrimError as e:
+                await query.answer(str(e), show_alert=True)
+                return
+            await query.answer(f"Режу заново: будет {plan.duration:.0f} с. Подожди немного")
+            width, height = (720, 1280) if cfg.vertical else (1280, 720)
+            try:
+                async with self._trimmer.trimmed(plan) as path:
+                    # The video is replaced in the same message, the buttons stay under it.
+                    await query.message.edit_media(
+                        InputMediaVideo(
+                            media=FSInputFile(path),
+                            caption=plan.caption or None,
+                            width=width,
+                            height=height,
+                            supports_streaming=True,
+                        ),
+                        reply_markup=self._keyboard(clip_id),
+                        request_timeout=300,
+                    )
+            except TrimError as e:
+                await query.message.answer(str(e))
+            except Exception:
+                log.exception("clip #%d: trim failed", clip_id)
+                await query.message.answer("Не получилось подрезать клип, подробности в логе.")
 
         return router

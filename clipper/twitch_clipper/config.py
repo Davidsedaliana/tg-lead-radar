@@ -71,6 +71,10 @@ class Settings:
     post_seconds: int = 15
     vertical: bool = True
     max_parallel_renders: int = 1
+    # Trim buttons: how much extra video around the clip is kept, and for how long.
+    trim_margin_before: int = 30
+    trim_margin_after: int = 30
+    keep_source_hours: int = 24  # 0 = keep nothing, no trim buttons
     timezone: str = "Europe/Moscow"
 
     # judge

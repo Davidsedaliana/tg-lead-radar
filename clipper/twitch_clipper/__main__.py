@@ -45,7 +45,7 @@ async def main() -> None:
         Transcriber(cfg.whisper_model, cfg.whisper_language) if cfg.whisper_model else None
     )
     clipper = Clipper(cfg, store, judge=judge, transcriber=transcriber)
-    bot = ClipBot(cfg, store, statuses=clipper.statuses, on_change=clipper.sync)
+    bot = ClipBot(cfg, store, statuses=clipper.statuses, on_change=clipper.sync, trimmer=clipper)
     clipper.send_clip = bot.send_clip
 
     try:

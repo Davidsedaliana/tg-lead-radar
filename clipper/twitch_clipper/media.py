@@ -77,6 +77,7 @@ async def render(raw: Path, out: Path, offset: float, duration: float, vertical:
     args += [
         "-r", "30",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "24",
+        "-maxrate", "3M", "-bufsize", "6M",  # keeps even a 100-second clip under 50 MB
         "-c:a", "aac", "-b:a", "128k",
         "-movflags", "+faststart",
         str(out),

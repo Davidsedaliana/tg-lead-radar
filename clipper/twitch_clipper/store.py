@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 SCHEMA = """
@@ -28,12 +29,40 @@ CREATE TABLE IF NOT EXISTS votes (
 """
 
 
+# Columns added after the first version; created on start if the database is older.
+CLIP_COLUMNS = {
+    "start_ts": "REAL",  # the clip's current boundaries, wall-clock time
+    "end_ts": "REAL",
+    "caption": "TEXT",
+    "source_path": "TEXT",  # wider recording around the clip, for the trim buttons
+    "source_start": "REAL",
+    "source_end": "REAL",
+}
+
+
+@dataclass(frozen=True)
+class ClipRow:
+    id: int
+    streamer: str
+    created_at: float
+    start: float | None
+    end: float | None
+    caption: str
+    source_path: str
+    source_start: float | None
+    source_end: float | None
+
+
 class Store:
     def __init__(self, path: Path | str) -> None:
         if path != ":memory:":
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(str(path))
         self.db.executescript(SCHEMA)
+        existing = {row[1] for row in self.db.execute("PRAGMA table_info(clips)")}
+        for column, kind in CLIP_COLUMNS.items():
+            if column not in existing:
+                self.db.execute(f"ALTER TABLE clips ADD COLUMN {column} {kind}")
         self.db.commit()
 
     # ---- streamers -------------------------------------------------------
@@ -89,6 +118,47 @@ class Store:
         )
         self.db.commit()
         return int(cur.lastrowid or 0)
+
+    def set_clip_range(
+        self, clip_id: int, start: float, end: float, caption: str | None = None
+    ) -> None:
+        self.db.execute(
+            "UPDATE clips SET start_ts = ?, end_ts = ?, caption = COALESCE(?, caption)"
+            " WHERE id = ?",
+            (start, end, caption, clip_id),
+        )
+        self.db.commit()
+
+    def set_source(self, clip_id: int, path: Path | str, start: float, end: float) -> None:
+        self.db.execute(
+            "UPDATE clips SET source_path = ?, source_start = ?, source_end = ? WHERE id = ?",
+            (str(path), start, end, clip_id),
+        )
+        self.db.commit()
+
+    def get_clip(self, clip_id: int) -> ClipRow | None:
+        row = self.db.execute(
+            "SELECT id, streamer, created_at, start_ts, end_ts, caption, source_path,"
+            " source_start, source_end FROM clips WHERE id = ?",
+            (clip_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return ClipRow(row[0], row[1], row[2], row[3], row[4], row[5] or "", row[6] or "",
+                       row[7], row[8])  # fmt: skip
+
+    def pop_old_sources(self, created_before: float) -> list[str]:
+        """Forget the saved sources of old clips and return their paths for deletion."""
+        rows = self.db.execute(
+            "SELECT source_path FROM clips WHERE source_path IS NOT NULL AND created_at < ?",
+            (created_before,),
+        ).fetchall()
+        self.db.execute(
+            "UPDATE clips SET source_path = NULL WHERE source_path IS NOT NULL AND created_at < ?",
+            (created_before,),
+        )
+        self.db.commit()
+        return [row[0] for row in rows]
 
     def vote(self, clip_id: int, user_id: int, value: int) -> tuple[int, int]:
         """Record a vote (a repeated identical vote removes it). Returns (likes, dislikes)."""

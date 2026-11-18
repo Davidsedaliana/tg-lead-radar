@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from collections import deque
-from collections.abc import Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 
 from .chat import ChatMessage, TwitchChat
@@ -26,6 +28,28 @@ ProbeFactory = Callable[[str], Probe]
 Status = tuple[str, str]
 
 CHAT_MEMORY_SECONDS = 180
+
+# Trim buttons: how many seconds each one moves the start and the end of the clip.
+TRIM_STEPS = {"s-10": (-10.0, 0.0), "s+5": (5.0, 0.0), "e-5": (0.0, -5.0), "e+10": (0.0, 10.0)}
+MIN_CLIP_SECONDS = 5.0
+
+
+class TrimError(Exception):
+    """Why a clip cannot be trimmed; the text is shown to the person who pressed the button."""
+
+
+@dataclass(frozen=True)
+class TrimPlan:
+    clip_id: int
+    source: Path
+    source_start: float
+    start: float
+    end: float
+    caption: str
+
+    @property
+    def duration(self) -> float:
+        return self.end - self.start
 
 
 class Clipper:
@@ -54,6 +78,7 @@ class Clipper:
         self._messages: dict[str, deque[tuple[float, str]]] = {}
         self._render_slots = asyncio.Semaphore(cfg.max_parallel_renders)
         self._tasks: set[asyncio.Task[None]] = set()
+        self._trimming: set[int] = set()
 
     # ---- streamers -------------------------------------------------------
 
@@ -104,7 +129,21 @@ class Clipper:
 
     async def run(self) -> None:
         await self.sync()
+        self._spawn(self._janitor())
         await self.chat.run()
+
+    def _spawn(self, coro: Awaitable[None]) -> None:
+        task = asyncio.ensure_future(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _janitor(self) -> None:
+        """Delete saved clip sources once they are older than keep_source_hours."""
+        while True:
+            cutoff = time.time() - self.cfg.keep_source_hours * 3600
+            for path in self.store.pop_old_sources(cutoff):
+                Path(path).unlink(missing_ok=True)
+            await asyncio.sleep(600)
 
     async def close(self) -> None:
         for task in self._tasks:
@@ -135,9 +174,7 @@ class Clipper:
                 "[%s] chat spike x%.1f (%d messages in %ds)",
                 msg.channel, spike.ratio, spike.count, self.cfg.chat_window,
             )  # fmt: skip
-            task = asyncio.create_task(self._make_clip(msg.channel, spike))
-            self._tasks.add(task)
-            task.add_done_callback(self._tasks.discard)
+            self._spawn(self._make_clip(msg.channel, spike))
 
     # ---- clip ------------------------------------------------------------
 
@@ -209,9 +246,80 @@ class Clipper:
                 name, spike.ts, cfg.timezone, category, spike.ratio, audio_mult,
                 score, summary, chat_lines,
             )  # fmt: skip
+            clip_end = clip_start + duration
+            self.store.set_clip_range(clip_id, clip_start, clip_end, caption)
             if self.send_clip is not None:
                 await self.send_clip(out, caption, clip_id, cfg.vertical)
             log.info("[%s] clip #%d sent", name, clip_id)
+            if cfg.keep_source_hours > 0:
+                self._spawn(self._save_source(clip_id, rec, clip_start, clip_end))
         finally:
             raw.unlink(missing_ok=True)
+            out.unlink(missing_ok=True)
+
+    # ---- trim buttons ----------------------------------------------------
+
+    async def _save_source(self, clip_id: int, rec: Recorder, start: float, end: float) -> None:
+        """Keep a wider recording around the clip so that it can be re-cut later."""
+        cfg = self.cfg
+        wide_start, wide_end = start - cfg.trim_margin_before, end + cfg.trim_margin_after
+        try:
+            # The clip is already sent; the extra seconds after it are still being recorded.
+            await asyncio.sleep(max(0.0, wide_end - time.time()) + cfg.segment_seconds * 2 + 2)
+            segments = rec.covering(wide_start, wide_end)
+            if not segments:
+                return
+            folder = cfg.data_dir / "sources"
+            folder.mkdir(parents=True, exist_ok=True)
+            path = folder / f"{clip_id}.ts"
+            await asyncio.to_thread(concat_segments, [s.path for s in segments], path)
+            self.store.set_source(clip_id, path, segments[0].start, segments[-1].end)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("clip #%d: source not saved, trim buttons will not work", clip_id)
+
+    def plan_trim(self, clip_id: int, action: str) -> TrimPlan:
+        """Work out the new boundaries for a pressed trim button, or say why it cannot be done."""
+        clip = self.store.get_clip(clip_id)
+        if clip is None or clip.start is None or clip.end is None or action not in TRIM_STEPS:
+            raise TrimError("Этот клип подрезать нельзя")
+        if clip_id in self._trimming:
+            raise TrimError("Уже режу этот клип, подожди")
+        if not clip.source_path or clip.source_start is None or clip.source_end is None:
+            if time.time() - clip.end < self.cfg.trim_margin_after + 60:
+                raise TrimError("Исходник ещё дописывается, нажми через полминуты")
+            raise TrimError("Исходник этого клипа не сохранился")
+        source = Path(clip.source_path)
+        if not source.is_file():
+            raise TrimError(f"Исходник уже удалён: он хранится {self.cfg.keep_source_hours} ч")
+
+        move_start, move_end = TRIM_STEPS[action]
+        start = max(clip.source_start, clip.start + move_start)
+        end = min(clip.source_end, clip.end + move_end)
+        if end - start < MIN_CLIP_SECONDS:
+            raise TrimError("Короче уже некуда")
+        if abs(start - clip.start) < 0.5 and abs(end - clip.end) < 0.5:
+            raise TrimError("Дальше в эту сторону записи нет")
+        return TrimPlan(clip_id, source, clip.source_start, start, end, clip.caption)
+
+    @contextlib.asynccontextmanager
+    async def trimmed(self, plan: TrimPlan) -> AsyncIterator[Path]:
+        """Render the re-cut clip. The new boundaries are saved only if the caller succeeds."""
+        if plan.clip_id in self._trimming:
+            raise TrimError("Уже режу этот клип, подожди")
+        self._trimming.add(plan.clip_id)
+        work = self.cfg.data_dir / "clips"
+        work.mkdir(parents=True, exist_ok=True)
+        out = work / f"trim_{plan.clip_id}_{int(time.time() * 1000)}.mp4"
+        try:
+            async with self._render_slots:
+                await render(
+                    plan.source, out, plan.start - plan.source_start, plan.duration,
+                    self.cfg.vertical,
+                )  # fmt: skip
+            yield out
+            self.store.set_clip_range(plan.clip_id, plan.start, plan.end)
+        finally:
+            self._trimming.discard(plan.clip_id)
             out.unlink(missing_ok=True)

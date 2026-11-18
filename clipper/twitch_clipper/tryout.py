@@ -122,6 +122,7 @@ def main() -> None:
     setup_console()
     load_dotenv()
     cfg = Settings.from_env()
+    cfg = dataclasses.replace(cfg, keep_source_hours=0)  # no buttons here, nothing to re-cut
     if args.any_game:
         cfg = dataclasses.replace(cfg, games=())
     names = [normalize_login(n) for n in args.streamers] or list(cfg.streamers)
