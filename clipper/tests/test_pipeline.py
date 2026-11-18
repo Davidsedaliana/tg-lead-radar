@@ -33,8 +33,8 @@ class FakeJudge:
         self.score = score
         self.calls: list[dict] = []
 
-    async def rate(self, streamer, chat_lines, transcript, frames, chat_mult, audio_mult):
-        self.calls.append({"chat": chat_lines, "frames": frames})
+    async def rate(self, streamer, game, chat_lines, transcript, frames, chat_mult, audio_mult):
+        self.calls.append({"chat": chat_lines, "frames": frames, "game": game})
         return Verdict(self.score, "funny", "тестовый момент")
 
 

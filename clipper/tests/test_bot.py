@@ -47,12 +47,12 @@ class Harness:
     def __init__(self, chat_id: int = CHAT) -> None:
         self.store = Store(":memory:")
         self.changes = 0
-        self.online: set[str] = set()
+        self.statuses: dict[str, tuple[str, str]] = {}
         self.session = FakeSession()
         self.clipbot = ClipBot(
             Settings(bot_token=TOKEN, chat_id=chat_id),
             self.store,
-            online=lambda: self.online,
+            statuses=lambda: self.statuses,
             on_change=self._changed,
         )
         self.bot = Bot(TOKEN, session=self.session)
@@ -114,9 +114,10 @@ async def test_add_list_remove():
     [reply] = await h.say("/add не логин!")
     assert "Не похоже на логин" in reply.text
 
-    h.online = {"steel"}
+    h.statuses = {"steel": ("recording", "Grand Theft Auto VI")}
     [reply] = await h.say("/list")
-    assert "⚫ buster ✂️" in reply.text and "🔴 steel ✂️" in reply.text
+    assert "⚫ buster ✂️" in reply.text
+    assert "🔴 steel · Grand Theft Auto VI ✂️" in reply.text
     assert len(reply.reply_markup.inline_keyboard) == 2
 
     [reply] = await h.say("/remove steel")

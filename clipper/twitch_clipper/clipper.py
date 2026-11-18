@@ -12,7 +12,7 @@ from .config import Settings
 from .detector import Spike, SpikeDetector
 from .judge import Judge, Transcriber
 from .media import concat_segments, grab_frames, render
-from .recorder import Recorder
+from .recorder import Probe, Recorder
 from .store import Store
 from .text import build_caption, guess_category, sample_chat
 
@@ -20,6 +20,10 @@ log = logging.getLogger(__name__)
 
 SendClip = Callable[[Path, str, int, bool], Awaitable[None]]
 SourceFactory = Callable[[str], Callable[[], Sequence[str]]]
+ProbeFactory = Callable[[str], Probe]
+
+# What /list shows for a streamer: (state, game). States: "recording", "other_game", "offline".
+Status = tuple[str, str]
 
 CHAT_MEMORY_SECONDS = 180
 
@@ -35,6 +39,7 @@ class Clipper:
         judge: Judge | None = None,
         transcriber: Transcriber | None = None,
         source_factory: SourceFactory | None = None,
+        probe_factory: ProbeFactory | None = None,
     ) -> None:
         self.cfg = cfg
         self.store = store
@@ -42,6 +47,7 @@ class Clipper:
         self.judge = judge
         self.transcriber = transcriber
         self._source_factory = source_factory
+        self._probe_factory = probe_factory
         self.chat = TwitchChat(self.on_message)
         self.recorders: dict[str, Recorder] = {}
         self._detectors: dict[str, SpikeDetector] = {}
@@ -54,6 +60,18 @@ class Clipper:
     def online(self) -> set[str]:
         return {name for name, rec in self.recorders.items() if rec.online}
 
+    def statuses(self) -> dict[str, Status]:
+        result: dict[str, Status] = {}
+        for name, rec in self.recorders.items():
+            game = rec.info.category if rec.info else ""
+            if rec.online:
+                result[name] = ("recording", game)
+            elif rec.wrong_game:
+                result[name] = ("other_game", game)
+            else:
+                result[name] = ("offline", "")
+        return result
+
     async def sync(self) -> None:
         """Start and stop recorders so they match the list in the database."""
         wanted = self.store.enabled_streamers()
@@ -64,7 +82,8 @@ class Clipper:
             log.info("[%s] stopped watching", name)
         for name in wanted - set(self.recorders):
             source = self._source_factory(name) if self._source_factory else None
-            rec = Recorder(name, self.cfg, source_cmd=source)
+            probe = self._probe_factory(name) if self._probe_factory else None
+            rec = Recorder(name, self.cfg, source_cmd=source, probe=probe)
             rec.start()
             self.recorders[name] = rec
             self._detectors[name] = SpikeDetector(
@@ -168,8 +187,9 @@ class Clipper:
             if self.judge is not None:
                 frames = await grab_frames(raw, offset, duration)
                 transcript = await self.transcriber.transcribe(out) if self.transcriber else ""
+                game = rec.info.category if rec.info else ""
                 verdict = await self.judge.rate(
-                    name, chat_lines, transcript, frames, spike.ratio, audio_mult
+                    name, game, chat_lines, transcript, frames, spike.ratio, audio_mult
                 )
                 if verdict is not None and verdict.score < cfg.min_score:
                     log.info("[%s] scored %d/10 (%s), not sent", name, verdict.score,

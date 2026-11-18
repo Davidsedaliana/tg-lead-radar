@@ -55,6 +55,7 @@ class Verdict:
 
 def build_content(
     streamer: str,
+    game: str,
     chat_lines: list[str],
     transcript: str,
     frames: list[bytes],
@@ -72,7 +73,10 @@ def build_content(
         }
         for frame in frames
     ]
-    parts = [f"Стример: {streamer}", f"Чат ускорился в {chat_mult:.1f} раза."]
+    parts = [f"Стример: {streamer}"]
+    if game:
+        parts.append(f"Игра: {game}")
+    parts.append(f"Чат ускорился в {chat_mult:.1f} раза.")
     if audio_mult is not None:
         parts.append(f"Громкость выросла в {audio_mult:.1f} раза.")
     chat = "\n".join(f"- {line}" for line in chat_lines) or "(пусто)"
@@ -101,6 +105,7 @@ class Judge:
     async def rate(
         self,
         streamer: str,
+        game: str,
         chat_lines: list[str],
         transcript: str,
         frames: list[bytes],
@@ -120,7 +125,7 @@ class Judge:
                 {
                     "role": "user",
                     "content": build_content(
-                        streamer, chat_lines, transcript, frames, chat_mult, audio_mult
+                        streamer, game, chat_lines, transcript, frames, chat_mult, audio_mult
                     ),
                 }
             ],

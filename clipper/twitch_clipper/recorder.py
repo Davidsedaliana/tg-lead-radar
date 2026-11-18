@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import statistics
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,6 +27,50 @@ class Segment:
     end: float
 
 
+@dataclass(frozen=True)
+class StreamInfo:
+    category: str  # the game, as Twitch names it
+    title: str
+
+
+def game_allowed(category: str, games: Sequence[str]) -> bool:
+    """An empty list allows everything; otherwise the category must match exactly."""
+    return not games or category.casefold() in {g.casefold() for g in games}
+
+
+def parse_probe(output: bytes) -> StreamInfo | None:
+    """Read `streamlink --json`: stream metadata when live, an error object when offline."""
+    try:
+        data = json.loads(output)
+    except ValueError:
+        return None
+    if not isinstance(data, dict) or "error" in data or not data.get("streams"):
+        return None
+    meta = data.get("metadata") or {}
+    return StreamInfo(category=meta.get("category") or "", title=meta.get("title") or "")
+
+
+async def streamlink_probe(name: str) -> StreamInfo | None:
+    """Ask Twitch whether the streamer is live and what they are playing."""
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, "-m", "streamlink", "--json", f"https://www.twitch.tv/{name}",
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )  # fmt: skip
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=60)
+    except (TimeoutError, asyncio.CancelledError):
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+        await proc.wait()
+        raise
+    return parse_probe(out)
+
+
+Probe = Callable[[], Awaitable[StreamInfo | None]]
+
+
 def streamlink_cmd(name: str, quality: str) -> list[str]:
     return [
         sys.executable, "-m", "streamlink",
@@ -41,6 +86,10 @@ class Recorder:
     While the streamer is offline the source command exits right away and is
     retried every `offline_poll_seconds`, so the recorder doubles as the
     online check.
+
+    With a list of games in the settings, the stream is recorded only while the
+    streamer is in one of those Twitch categories: the category is checked
+    before recording starts and every `category_poll_seconds` during it.
     """
 
     def __init__(
@@ -48,11 +97,16 @@ class Recorder:
         name: str,
         cfg: Settings,
         source_cmd: Callable[[], Sequence[str]] | None = None,
+        probe: Probe | None = None,
     ) -> None:
         self.name = name
         self.cfg = cfg
         self.dir = cfg.data_dir / "buffer" / name
         self._source_cmd = source_cmd or (lambda: streamlink_cmd(name, cfg.quality))
+        if probe is None and cfg.games:
+            probe = lambda: streamlink_probe(name)  # noqa: E731
+        self._probe = probe
+        self.info: StreamInfo | None = None  # what the last check saw; None when offline
         self._levels: dict[str, float] = {}
         self._recording = False
         self._newest = 0.0  # mtime of the newest segment, refreshed every second
@@ -75,10 +129,44 @@ class Recorder:
     def online(self) -> bool:
         return self._recording and time.time() - self._newest < 30
 
+    @property
+    def wrong_game(self) -> bool:
+        """Live, but in a category that is not on the list."""
+        return self.info is not None and not game_allowed(self.info.category, self.cfg.games)
+
+    async def _check(self) -> bool | None:
+        """True: record. False: live, but another game. None: offline or the check failed."""
+        assert self._probe is not None
+        try:
+            info = await self._probe()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 - a failed check is the same as "unknown"
+            log.warning("[%s] stream check failed: %s", self.name, e)
+            return None
+        if info is None:
+            self.info = None
+            return None
+        if self.info is None or info.category != self.info.category:
+            log.info("[%s] live, playing %s", self.name, info.category or "(no category)")
+        self.info = info
+        return game_allowed(info.category, self.cfg.games)
+
+    async def _wait_for_other_game(self) -> None:
+        """Returns when the streamer switches to a game that is not on the list."""
+        while True:
+            await asyncio.sleep(self.cfg.category_poll_seconds)
+            # A failed check or 'offline' does not stop the recording: if the stream
+            # really ended, the source process exits on its own.
+            if await self._check() is False:
+                log.info("[%s] switched to another game, recording paused", self.name)
+                return
+
     async def _run(self) -> None:
         while True:
             try:
-                await self._record_once()
+                if self._probe is None or await self._check():
+                    await self._record_once()
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -119,6 +207,8 @@ class Recorder:
             self._recording = True
             watcher = asyncio.create_task(self._watch())
             waits = [asyncio.create_task(p.wait()) for p in procs]
+            if self._probe is not None:
+                waits.append(asyncio.create_task(self._wait_for_other_game()))
             try:
                 await asyncio.wait(waits, return_when=asyncio.FIRST_COMPLETED)
             finally:

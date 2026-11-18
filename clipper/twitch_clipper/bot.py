@@ -46,15 +46,21 @@ def vote_keyboard(clip_id: int, likes: int = 0, dislikes: int = 0) -> InlineKeyb
     )
 
 
+_ICONS = {"recording": "🔴", "other_game": "🟡", "offline": "⚫"}
+
+
 def streamers_view(
-    streamers: list[tuple[str, bool]], online: set[str]
+    streamers: list[tuple[str, bool]], statuses: dict[str, tuple[str, str]]
 ) -> tuple[str, InlineKeyboardMarkup | None]:
     if not streamers:
         return "Список пуст. Добавь стримера: /add логин", None
-    lines = [
-        f"{'🔴' if name in online else '⚫'} {name}{' ✂️' if enabled else ''}"
-        for name, enabled in streamers
-    ]
+    lines = []
+    for name, enabled in streamers:
+        state, game = statuses.get(name, ("offline", ""))
+        line = f"{_ICONS[state]} {name}"
+        if game:
+            line += f" · {game}"
+        lines.append(line + (" ✂️" if enabled else ""))
     buttons = [
         [
             InlineKeyboardButton(
@@ -64,7 +70,7 @@ def streamers_view(
         ]
         for name, enabled in streamers
     ]
-    text = "🔴 в эфире · ✂️ режу\n\n" + "\n".join(lines)
+    text = "🔴 пишу · 🟡 в эфире, но другая игра · ✂️ включён\n\n" + "\n".join(lines)
     return text, InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -73,12 +79,12 @@ class ClipBot:
         self,
         cfg: Settings,
         store: Store,
-        online: Callable[[], set[str]],
+        statuses: Callable[[], dict[str, tuple[str, str]]],
         on_change: Callable[[], Awaitable[None]],
     ) -> None:
         self.cfg = cfg
         self.store = store
-        self._online = online
+        self._statuses = statuses
         self._on_change = on_change
         self.bot = Bot(cfg.bot_token)
         self.dp = Dispatcher()
@@ -125,7 +131,7 @@ class ClipBot:
 
         @router.message(Command("list"))
         async def list_streamers(message: Message) -> None:
-            text, keyboard = streamers_view(store.streamers(), self._online())
+            text, keyboard = streamers_view(store.streamers(), self._statuses())
             await message.answer(text, reply_markup=keyboard)
 
         @router.message(Command("add"))
@@ -166,7 +172,7 @@ class ClipBot:
                 return
             await self._on_change()
             await query.answer(f"{'Режу' if state else 'Не режу'} {name}")
-            text, keyboard = streamers_view(store.streamers(), self._online())
+            text, keyboard = streamers_view(store.streamers(), self._statuses())
             if isinstance(query.message, Message):
                 try:
                     await query.message.edit_text(text, reply_markup=keyboard)

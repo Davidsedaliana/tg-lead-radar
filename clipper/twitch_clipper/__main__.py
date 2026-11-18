@@ -45,7 +45,7 @@ async def main() -> None:
         Transcriber(cfg.whisper_model, cfg.whisper_language) if cfg.whisper_model else None
     )
     clipper = Clipper(cfg, store, judge=judge, transcriber=transcriber)
-    bot = ClipBot(cfg, store, online=clipper.online, on_change=clipper.sync)
+    bot = ClipBot(cfg, store, statuses=clipper.statuses, on_change=clipper.sync)
     clipper.send_clip = bot.send_clip
 
     try:
@@ -54,8 +54,9 @@ async def main() -> None:
             await bot.run()
             return
         log.info(
-            "started: %d streamers, scoring %s",
+            "started: %d streamers, games: %s, scoring %s",
             len(store.streamers()),
+            ", ".join(cfg.games) or "any",
             f"with {cfg.judge_model}" if judge else "off (no ANTHROPIC_API_KEY)",
         )
         await asyncio.gather(bot.run(), clipper.run())

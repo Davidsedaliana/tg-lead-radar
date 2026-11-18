@@ -41,6 +41,7 @@ def test_settings_from_env():
             "BOT_TOKEN": "x",
             "CHAT_ID": "-100123",
             "STREAMERS": "Buster, twitch.tv/evelone192,",
+            "GAMES": "Grand Theft Auto VI, Grand Theft Auto V ",
             "CHAT_MULT": "2.5",
             "VERTICAL": "0",
             "MIN_SCORE": "",
@@ -49,6 +50,7 @@ def test_settings_from_env():
     )
     assert cfg.chat_id == -100123
     assert cfg.streamers == ("buster", "evelone192")
+    assert cfg.games == ("Grand Theft Auto VI", "Grand Theft Auto V")
     assert cfg.chat_mult == 2.5
     assert cfg.vertical is False
     assert cfg.min_score == 6  # empty value keeps the default
@@ -109,13 +111,14 @@ def test_store_streamers_and_votes():
 
 
 def test_streamers_view_and_keyboards():
-    text, keyboard = streamers_view([("buster", False), ("steel", True)], {"steel"})
-    assert "⚫ buster" in text and "🔴 steel ✂️" in text
+    statuses = {"steel": ("recording", "Grand Theft Auto VI"), "buster": ("other_game", "Chess")}
+    text, keyboard = streamers_view([("buster", False), ("steel", True)], statuses)
+    assert "🟡 buster · Chess\n" in text and "🔴 steel · Grand Theft Auto VI ✂️" in text
     assert keyboard is not None
     buttons = [row[0] for row in keyboard.inline_keyboard]
     assert [b.text for b in buttons] == ["🎬 Резать buster", "⏹ Не резать steel"]
     assert [b.callback_data for b in buttons] == ["t:buster", "t:steel"]
-    assert streamers_view([], set())[1] is None
+    assert streamers_view([], {})[1] is None
 
     row = vote_keyboard(7, likes=2).inline_keyboard[0]
     assert [b.text for b in row] == ["👍 2", "👎"]
@@ -123,7 +126,10 @@ def test_streamers_view_and_keyboards():
 
 
 def test_judge_content_and_verdict():
-    content = build_content("buster", ["АХАХА"], "ну всё", [b"\xff\xd8jpeg"], 3.0, None)
+    content = build_content(
+        "buster", "Grand Theft Auto VI", ["АХАХА"], "ну всё", [b"\xff\xd8jpeg"], 3.0, None
+    )
+    assert "Игра: Grand Theft Auto VI" in content[-1]["text"]
     assert [block["type"] for block in content] == ["image", "text"]
     assert "<chat>\n- АХАХА\n</chat>" in content[-1]["text"]
     assert "<transcript>\nну всё\n</transcript>" in content[-1]["text"]

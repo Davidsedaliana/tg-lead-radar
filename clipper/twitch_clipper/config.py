@@ -33,6 +33,8 @@ class Settings:
     bot_token: str = ""
     chat_id: int = 0
     streamers: tuple[str, ...] = ()
+    # Twitch categories to cut clips from, exact names; empty means any game.
+    games: tuple[str, ...] = ()
     data_dir: Path = Path("data")
 
     # recording
@@ -40,6 +42,7 @@ class Settings:
     segment_seconds: int = 4
     buffer_seconds: int = 240
     offline_poll_seconds: int = 60
+    category_poll_seconds: int = 120
 
     # detector
     chat_window: int = 10
@@ -82,7 +85,8 @@ class Settings:
             elif isinstance(default, Path):
                 values[f.name] = Path(raw)
             elif isinstance(default, tuple):
-                values[f.name] = tuple(n for n in (normalize_login(x) for x in raw.split(",")) if n)
+                clean = normalize_login if f.name == "streamers" else str.strip
+                values[f.name] = tuple(n for n in (clean(x) for x in raw.split(",")) if n)
             else:
                 values[f.name] = raw
         if "JUDGE_ENABLED" not in env:
