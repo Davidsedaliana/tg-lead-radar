@@ -15,7 +15,8 @@ def load_dotenv(path: str | Path = ".env") -> None:
     p = Path(path)
     if not p.is_file():
         return
-    for raw in p.read_text(encoding="utf-8").splitlines():
+    # utf-8-sig: Notepad on Windows saves a byte-order mark that would corrupt the first key
+    for raw in p.read_text(encoding="utf-8-sig").splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -75,6 +76,7 @@ class Settings:
     trim_margin_before: int = 30
     trim_margin_after: int = 30
     keep_source_hours: int = 24  # 0 = keep nothing, no trim buttons
+    sources_max_gb: float = 5.0  # oldest sources are deleted first when over this size
     timezone: str = "Europe/Moscow"
 
     # judge

@@ -15,8 +15,9 @@
 - расшифровка речи (faster-whisper);
 - на Windows.
 
-Первый шаг на машине с доступом к Twitch:
-`python -m twitch_clipper.tryout <логин> --minutes 30` и разбор того, что сломается.
+Первый шаг на машине с доступом к Twitch: `python -m twitch_clipper.doctor`
+(самопроверка по пунктам), затем `python -m twitch_clipper.tryout --minutes 30`
+и разбор того, что сломается.
 
 ## Договорённости с владельцем
 

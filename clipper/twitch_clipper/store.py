@@ -160,6 +160,14 @@ class Store:
         self.db.commit()
         return [row[0] for row in rows]
 
+    def source_paths(self) -> set[str]:
+        rows = self.db.execute("SELECT source_path FROM clips WHERE source_path IS NOT NULL")
+        return {row[0] for row in rows}
+
+    def forget_source(self, path: Path | str) -> None:
+        self.db.execute("UPDATE clips SET source_path = NULL WHERE source_path = ?", (str(path),))
+        self.db.commit()
+
     def vote(self, clip_id: int, user_id: int, value: int) -> tuple[int, int]:
         """Record a vote (a repeated identical vote removes it). Returns (likes, dislikes)."""
         row = self.db.execute(

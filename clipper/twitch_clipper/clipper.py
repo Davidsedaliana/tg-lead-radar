@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import shutil
 import time
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
@@ -32,6 +33,12 @@ CHAT_MEMORY_SECONDS = 180
 # Trim buttons: how many seconds each one moves the start and the end of the clip.
 TRIM_STEPS = {"s-10": (-10.0, 0.0), "s+5": (5.0, 0.0), "e-5": (0.0, -5.0), "e+10": (0.0, 10.0)}
 MIN_CLIP_SECONDS = 5.0
+
+
+def remove(path: Path) -> None:
+    """Delete a file; a file that is busy or already gone is not worth crashing over."""
+    with contextlib.suppress(OSError):
+        path.unlink(missing_ok=True)
 
 
 class TrimError(Exception):
@@ -132,9 +139,22 @@ class Clipper:
         self.chat.set_channels(wanted)
 
     async def run(self) -> None:
+        await asyncio.to_thread(self.clean_leftovers)
         await self.sync()
         self._spawn(self._janitor())
         await self.chat.run()
+
+    def clean_leftovers(self) -> None:
+        """On start, remove what a previous run left behind (a crash, a power cut)."""
+        data = self.cfg.data_dir
+        # Buffers and half-made clips of the previous run are useless after a restart.
+        shutil.rmtree(data / "buffer", ignore_errors=True)
+        shutil.rmtree(data / "clips", ignore_errors=True)
+        # Sources that no clip in the database points to any more.
+        known = {Path(p).resolve() for p in self.store.source_paths()}
+        for path in (data / "sources").glob("*.ts"):
+            if path.resolve() not in known:
+                remove(path)
 
     def _spawn(self, coro: Awaitable[None]) -> None:
         task = asyncio.ensure_future(coro)
@@ -142,12 +162,30 @@ class Clipper:
         task.add_done_callback(self._tasks.discard)
 
     async def _janitor(self) -> None:
-        """Delete saved clip sources once they are older than keep_source_hours."""
         while True:
-            cutoff = time.time() - self.cfg.keep_source_hours * 3600
-            for path in self.store.pop_old_sources(cutoff):
-                Path(path).unlink(missing_ok=True)
+            await asyncio.to_thread(self.clean_sources)
             await asyncio.sleep(600)
+
+    def clean_sources(self) -> None:
+        """Delete clip sources that are too old, then the oldest ones if they take too much."""
+        cutoff = time.time() - self.cfg.keep_source_hours * 3600
+        for old in self.store.pop_old_sources(cutoff):
+            remove(Path(old))
+
+        files: list[tuple[float, int, Path]] = []
+        for path in (self.cfg.data_dir / "sources").glob("*.ts"):
+            with contextlib.suppress(OSError):
+                stat = path.stat()
+                files.append((stat.st_mtime, stat.st_size, path))
+        files.sort()
+        total = sum(size for _, size, _ in files)
+        limit = self.cfg.sources_max_gb * 1024**3
+        for _, size, path in files:
+            if total <= limit:
+                break
+            self.store.forget_source(path)
+            remove(path)
+            total -= size
 
     async def close(self) -> None:
         for task in self._tasks:
@@ -258,8 +296,8 @@ class Clipper:
             if cfg.keep_source_hours > 0:
                 self._spawn(self._save_source(clip_id, rec, clip_start, clip_end))
         finally:
-            raw.unlink(missing_ok=True)
-            out.unlink(missing_ok=True)
+            remove(raw)
+            remove(out)
 
     # ---- trim buttons ----------------------------------------------------
 
@@ -326,4 +364,4 @@ class Clipper:
             self.store.set_clip_range(plan.clip_id, plan.start, plan.end)
         finally:
             self._trimming.discard(plan.clip_id)
-            out.unlink(missing_ok=True)
+            remove(out)

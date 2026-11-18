@@ -5,6 +5,7 @@ import contextlib
 import json
 import logging
 import os
+import shutil
 import statistics
 import sys
 import time
@@ -142,6 +143,8 @@ class Recorder:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
             self._task = None
+        # Nobody cleans the buffer of a streamer that is no longer watched, so drop it now.
+        await asyncio.to_thread(shutil.rmtree, self.dir, True)
 
     @property
     def online(self) -> bool:
@@ -264,12 +267,16 @@ class Recorder:
     # ---- segments --------------------------------------------------------
 
     def _files(self) -> list[tuple[float, Path]]:
-        """All segment files as (mtime, path), oldest first."""
+        """All segment files as (mtime, path), oldest first.
+
+        The order comes from the file names (start time of the run, then a counter),
+        not from mtime: for a file that is still being written, mtime is not reliable
+        on every file system.
+        """
         out: list[tuple[float, Path]] = []
-        for p in self.dir.glob("*.ts"):
-            with contextlib.suppress(FileNotFoundError):
+        for p in sorted(self.dir.glob("*.ts"), key=lambda p: p.name):
+            with contextlib.suppress(OSError):
                 out.append((p.stat().st_mtime, p))
-        out.sort()
         return out
 
     def segments(self) -> list[Segment]:
@@ -295,10 +302,11 @@ class Recorder:
         """Drop segments older than the buffer and measure loudness of new ones."""
         horizon = time.time() - self.cfg.buffer_seconds
         files = self._files()
-        self._newest = files[-1][0] if files else 0.0
+        self._newest = max((mtime for mtime, _ in files), default=0.0)
         for mtime, path in files:
             if mtime < horizon:
-                path.unlink(missing_ok=True)
+                with contextlib.suppress(OSError):
+                    path.unlink(missing_ok=True)
                 self._levels.pop(path.name, None)
         for s in self.segments():
             if s.path.name not in self._levels:

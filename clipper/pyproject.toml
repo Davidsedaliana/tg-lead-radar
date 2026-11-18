@@ -8,6 +8,7 @@ dependencies = [
     "aiohttp>=3.9",
     "streamlink>=7.0",
     "anthropic>=1.0",
+    "tzdata; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]

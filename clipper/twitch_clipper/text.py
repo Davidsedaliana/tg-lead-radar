@@ -6,7 +6,7 @@ import re
 from collections import Counter
 from collections.abc import Iterable
 from datetime import datetime
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 CATEGORIES = {
     "funny": "😂 смешно",
@@ -71,7 +71,11 @@ def build_caption(
     summary: str,
     chat_lines: list[str],
 ) -> str:
-    when = datetime.fromtimestamp(ts, ZoneInfo(timezone)).strftime("%d.%m %H:%M")
+    try:
+        zone = ZoneInfo(timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        zone = None  # no time zone database (Windows without tzdata): use the computer's time
+    when = datetime.fromtimestamp(ts, zone).strftime("%d.%m %H:%M")
     head = [f"🎬 {streamer}", when, CATEGORIES.get(category, CATEGORIES["other"])]
     head.append(f"чат x{chat_mult:.1f}")
     if audio_mult is not None:
