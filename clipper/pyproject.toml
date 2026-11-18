@@ -1,0 +1,38 @@
+[project]
+name = "twitch-clipper"
+version = "0.1.0"
+description = "Telegram bot that records Twitch streams, detects chat spikes and posts short clips"
+requires-python = ">=3.11"
+dependencies = [
+    "aiogram>=3.13",
+    "streamlink>=7.0",
+    "anthropic>=1.0",
+]
+
+[project.optional-dependencies]
+whisper = ["faster-whisper>=1.0"]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["twitch_clipper*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
